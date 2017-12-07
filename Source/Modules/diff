@@ -1,0 +1,2233 @@
+diff -urN neolixDepthModule/base.h neolixDepthModuleDemo/base.h
+--- neolixDepthModule/base.h	2017-12-05 14:46:33.152528051 +0800
++++ neolixDepthModuleDemo/base.h	1970-01-01 08:30:00.000000000 +0830
+@@ -1,114 +0,0 @@
+-#pragma once
+-#include <iostream>
+-#include <stdio.h>
+-//#include <windows.h>   //platform specific
+-#include <math.h>
+-//#include <fstream>
+-//using namespace std;
+-
+-#include <XnCppWrapper.h>
+-#include <XnModuleCppInterface.h>
+-#include <XnEvent.h>
+-#include <XnLog.h>
+-#include <XnOS.h>
+-using namespace xn;
+-
+-//#include <chrono>
+-//using namespace std::chrono;
+-
+-
+-
+-#define HRESULT long //zhangw add
+-#define S_OK ((HRESULT)0l) //zhangw add
+-#define S_FALSE ((HRESULT)1l) //zhangw add
+-//#include "opencv2/opencv.hpp"
+-
+-struct XnStatusException {
+-	const XnStatus nStatus;
+-	const HRESULT hResult;
+-
+-	XnStatusException(XnStatus n, HRESULT hr = S_OK) : nStatus(n), hResult(hr) {}
+-};
+-
+-#define CHECK_XN_STATUS(statement) \
+-{ \
+-	XnStatus __status = (statement); \
+-	if (__status != XN_STATUS_OK) { xnPrintError(__status, #statement); throw XnStatusException(__status); } \
+-}
+-inline void printHResult(HRESULT hr, const char* statement)
+-{
+-	 
+-	fprintf(stderr, "Failed: [%08x] (%s)\n", hr, statement);
+-}
+-
+-#define CHECK_HRESULT(statement) \
+-{ \
+-	HRESULT __hr = (statement); \
+-	if (FAILED(__hr)) { printHResult(__hr, #statement); throw XnStatusException(XN_STATUS_ERROR, __hr); } \
+-}
+-
+-#define LOG(format, ...) fprintf(stderr, format, __VA_ARGS__)
+-
+-
+-#define MAX_USERS		 8
+-#define PI 3.1415926f
+-#define DUMMY_FOV 1.35f
+-#define SUPPORTED_FPS 30
+-#define MAX_DEPTH_VALUE	10000
+-
+-#define TEST_HUMANPLUS	0
+-#define TEST_INUITIVE	1
+-#define TEST_ADI		2
+-#define TEST_ESPDI		3
+-#define TEST_PRIMESENSE	4
+-#define TEST_SUNNYMARS	5
+-#define TEST_TY			6
+-
+-#define TEST_CASE 6//TEST_SUNNYMARS
+-
+-
+-
+-#if TEST_CASE == TEST_HUMANPLUS
+-#define SUPPORTED_X_RES 752 
+-#define SUPPORTED_Y_RES 480
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+- 
+-#elif TEST_CASE == TEST_INUITIVE
+-#define SUPPORTED_X_RES 1264
+-#define SUPPORTED_Y_RES 752
+-#define HFOV ( 57.5f * PI / 180.0f )
+-#define VFOV ( 43.5f * PI / 180.0f )
+- 
+-#elif TEST_CASE == TEST_ADI
+-#define SUPPORTED_X_RES 640
+-#define SUPPORTED_Y_RES 480
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+-
+-#elif TEST_CASE == TEST_ESPDI
+-#define SUPPORTED_X_RES 1280
+-#define SUPPORTED_Y_RES 720
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+-
+-#elif TEST_CASE == TEST_PRIMESENSE
+-#define SUPPORTED_X_RES 320
+-#define SUPPORTED_Y_RES 240
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+-#elif TEST_CASE == TEST_SUNNYMARS
+-#define SUPPORTED_X_RES 224
+-#define SUPPORTED_Y_RES 172
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+-#elif TEST_CASE == TEST_TY
+-#define SUPPORTED_X_RES 640
+-#define SUPPORTED_Y_RES 480
+-#define HFOV DUMMY_FOV
+-#define VFOV DUMMY_FOV
+-#endif
+-
+-inline int GetXRes() { return SUPPORTED_X_RES; }
+-inline int GetYRes() { return SUPPORTED_Y_RES; }
+-inline int GetFPS() { return SUPPORTED_FPS; }
+diff -urN neolixDepthModule/DepthLetv.cpp neolixDepthModuleDemo/DepthLetv.cpp
+--- neolixDepthModule/DepthLetv.cpp	2017-12-05 14:46:33.260528053 +0800
++++ neolixDepthModuleDemo/DepthLetv.cpp	1970-01-01 08:30:00.000000000 +0830
+@@ -1,855 +0,0 @@
+-/*****************************************************************************
+-*                                                                            *
+-*  Copyright (C) 2017 Letv.                                                  *
+-*                                                                            *
+-*  This is afree software: you can redistribute it and/or modify             *
+-*  it under the terms of the GNU Lesser General Public License as published  *
+-*  by the Free Software Foundation, either version 3 of the License, or      *
+-*  (at your option) any later version.                                       *
+-*                                                                            *
+-*  This is distributed in the hope that it will be useful,                   *
+-*  but WITHOUT ANY WARRANTY; without even the implied warranty of            *
+-*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the              *
+-*  GNU Lesser General Public License for more details.                       *
+-*                                                                            *
+-*  You should see a copy of the GNU Lesser General Public License			 *
+-*  in <http://www.gnu.org/licenses/>.										 *
+-*                                                                            *
+-*****************************************************************************/
+-
+-#include <iostream>
+-#include <stdio.h>
+-#include <XnLog.h>
+-
+-//---------------------------------------------------------------------------
+-// Includes
+-//---------------------------------------------------------------------------
+-#include "DepthLetv.h"
+-
+-using namespace std;
+-
+-DepthLetv::DepthLetv() : 
+-	m_bGenerating(FALSE),
+-	m_bDataAvailable(FALSE),
+-	m_pDepthMap(NULL),
+-	m_nFrameID(0),
+-	m_nTimestamp(0),
+-	m_hScheduler(NULL),
+-	m_bMirror(FALSE)
+-{
+-	
+-}
+-#define nullptr NULL
+-typedef unsigned char BYTE;
+-DepthLetv::~DepthLetv()
+-{
+-	printf("DepthLetv::~DepthLetv() \n");
+-	delete[] m_pDepthMap;
+-
+-#if TEST_CASE == 0
+-	pCam->CloseCamera();
+-	if (pCam)
+-		delete pCam;
+-
+-	if (imgData)
+-		delete imgData;
+-#elif TEST_CASE == 1
+-	// Stop and terminate depth streams 
+-	CInuError ret = eOK;
+-	if (m_depthStream_Inu != nullptr)
+-	{
+-		ret = m_depthStream_Inu->Stop();
+-		if (ret != InuDev::eOK)
+-		{
+-			cout << "Failed to stop depth stream: " << string(ret) << endl;
+-		}
+-
+-		ret = m_depthStream_Inu->Terminate();
+-		if (ret != InuDev::eOK)
+-		{
+-			cout << "Failed to finalize depth stream: " << string(ret) << endl;
+-		}
+-		m_depthStream_Inu = nullptr;
+-	}
+-
+-	// Stop and terminate InuSensor
+-	if (m_device_Inu != nullptr)
+-	{
+-		ret = m_device_Inu->Stop();
+-		if (ret != InuDev::eOK)
+-		{
+-			cout << "Failed to stop Sensor: " << string(ret) << endl;
+-		}
+-
+-		ret = m_device_Inu->Terminate();
+-		if (ret != InuDev::eOK)
+-		{
+-			cout << "Failed to finalize Sensor: " << string(ret) << endl;
+-		}
+-
+-		m_device_Inu = nullptr;
+-	}
+-#elif TEST_CASE == 2
+-	m_ADI_obj.Release();
+-#elif TEST_CASE == 3
+-	m_Value = 0;
+-	EtronDI_SetFWRegister(m_hEtronDI, &m_DevSelInfo, m_RegAddr, m_Value, m_flag);
+-
+-	EtronDI_CloseDevice(m_hEtronDI, &m_DevSelInfo);
+-	EtronDI_Release(&m_hEtronDI);
+-	delete[] m_pDevInfo;
+-	delete[] m_pDepthImgBuf;
+-#elif TEST_CASE == 5
+-	LibTOF_DisConnect();
+-	if (frame_data != NULL)
+-	{
+-		free(frame_data);
+-	}
+-
+-	if (frame_data_Rgb != NULL)
+-	{
+-		free(frame_data_Rgb);
+-	}
+-	if (PColorbuffer_s != NULL)
+-	{
+-		free(PColorbuffer_s);
+-	}
+-#elif TEST_CASE == TEST_TY
+-	if (hasOpen)
+-	{
+-		ASSERT_OK(TYStopCapture(hDevice));
+-		ASSERT_OK(TYCloseDevice(hDevice));
+-		ASSERT_OK(TYDeinitLib());
+-	}
+-	if (pVer != nullptr) delete pVer;
+-	if (pDeviceBaseInfo != nullptr) delete pDeviceBaseInfo;
+-	if (frameBuffer[0] != nullptr) delete[] frameBuffer[0];
+-	if (frameBuffer[1] != nullptr) delete[] frameBuffer[1];
+-	hasOpen = false;
+-
+-#endif
+-}
+-
+-XnStatus DepthLetv::Init()
+-{
+-	printf("DepthLetv::Init() \n");
+-
+-	// Aloca o mapa de profundidade
+-	m_pDepthMap = new XnDepthPixel[SUPPORTED_X_RES * SUPPORTED_Y_RES];
+-
+-	if (m_pDepthMap == NULL)
+-	{
+-		return XN_STATUS_ALLOC_FAILED;
+-	}
+-
+-#if TEST_CASE == 0
+-	// Init HumanPlus
+-	movesense::CameraMode sel = CAM_STEREO_752X480_LD_30FPS;
+-	pCam = new movesense::MoveSenseCamera(sel);
+-
+-	if (!(movesense::MS_SUCCESS == pCam->OpenCamera()))
+-	{
+-		printf("DepthLetv::Init(), depth camera open failed \n");
+-		return XN_STATUS_DEVICE_NOT_CONNECTED;
+-	}
+-	pCam->SetUndistort(false);
+-
+-	width = SUPPORTED_X_RES;
+-	height = SUPPORTED_Y_RES;
+-	imgLen = width*height * 2;
+-	imgData = new unsigned char[imgLen];
+-#elif TEST_CASE == 1
+-	m_device_Inu = InuDev::CInuSensor::Create();
+-
+-	// Define parameters for initialization
+-	InuDev::CSensorParams params;
+-	params.FPS = SUPPORTED_FPS;
+-	params.SensorRes = InuDev::ESensorResolution::eFull;
+-
+-	// Initiate the sensor - it must be call before any access to the sensor. Sensor will start working in low power.
+-	InuDev::CInuError m_retCode = m_device_Inu->Init(params);
+-	if (m_retCode != InuDev::eOK)
+-	{
+-		std::cout << "Failed to connect to Inuitive Sensor. Error: " << std::hex << int(m_retCode) << " - " << std::string(m_retCode) << std::endl;
+-		return XN_STATUS_ERROR;
+-	}
+-	std::cout << "Connected to Sensor !......" << std::endl;
+-
+-	// Start acquiring frames - it must be call before starting acquiring any type of frames (depth, video, head, etc.)
+-	m_retCode = m_device_Inu->Start();
+-	if (m_retCode != InuDev::eOK)
+-	{
+-		std::cout << "Failed to start to Inuitive Sensor." << std::endl;
+-		return XN_STATUS_ERROR;
+-	}
+-	std::cout << "Sensor is started !" << std::endl;
+-
+-	// Generate a Depth stream object. This object provides depth frames. 
+-	m_depthStream_Inu = m_device_Inu->CreateDepthStream(); // m_depthStream->Init(InuDev::eAccurate/eFastMode/eDisabled); 
+-	if (m_depthStream_Inu == nullptr)
+-	{
+-		std::cout << "Unexpected error, failed to get Depth Stream" << std::endl;
+-		return XN_STATUS_ERROR;
+-	}
+-
+-	// Configure Depth parameters and start the depth service on device
+-	m_retCode = m_depthStream_Inu->Init();
+-	if (m_retCode != InuDev::eOK)
+-	{
+-		std::cout << "Depth initiation error: " << std::hex << int(m_retCode) << " - " << std::string(m_retCode) << std::endl;
+-		return XN_STATUS_ERROR;
+-	}
+-	std::cout << "Depth Stream is initialized !" << std::endl;
+-
+-	// Start depth frames acquisition (operation mode)
+-	m_retCode = m_depthStream_Inu->Start();
+-
+-	if (m_retCode != InuDev::eOK)
+-	{
+-		std::cout << "Start error: " << std::hex << int(m_retCode) << " - " << std::string(m_retCode) << std::endl;
+-		return XN_STATUS_ERROR;
+-	}
+-	std::cout << "Depth frames acquisition started!" << std::endl;
+-
+-	// get depth frame
+-	m_retCode = m_depthStream_Inu->GetFrame(m_depthFrame_Inu);
+-	if (m_retCode != eOK)
+-	{
+-		cout << "Failed to acquire depth frame: " << string(m_retCode) << endl;
+-		return XN_STATUS_ERROR;
+-	}
+-
+-	if (m_depthFrame_Inu.Valid)
+-	{
+-// 		m_DepthWidth = m_depthFrame_Inu.Width();
+-// 		m_DepthHeight = m_depthFrame_Inu.Height();
+-	}
+-	else
+-	{
+-		cout << "depth frame isn't valid!" << endl;
+-		return eInitError;
+-	}
+-#elif TEST_CASE == 2
+-	//Initialize the camera
+-	int status = m_ADI_obj.Init(0, 0);
+-	if (status == -1)
+-	{
+-		cout << "ADI Init Failed\n";
+-		return -1;
+-	}
+-
+-	//Set the Depth Range, For Playback select the depth range data was captured
+-	//obj.setDepthIRMode(false);
+-	m_ADI_obj.setDepthRange((range)XNEAR_RANGE, 0);
+-	uint16 d = m_ADI_obj.getDepthRange();
+-	cout << "Depth Range=" << d << endl;
+-	m_ADI_obj.setPulseCount(700);
+-	d = m_ADI_obj.getPulseCount();
+-	cout << "pulse=" << d << endl;
+-
+-	m_ADI_obj.getCameraIntrinsic();
+-	// Filter
+-	m_ADI_obj.setFilter(FILT_SEL_GAUS5X5X2);
+-	m_ADI_obj.setTemporalFilter();
+-	m_ADI_obj.setThreshold(50);
+-#elif TEST_CASE == 3
+-	// Etron Init
+-	if (0 > EtronDI_Init(&m_hEtronDI, false)) 
+-	{
+-		return (XN_STATUS_ERROR);
+-	}
+-
+-// 	// Etron Find Device
+-// 	EtronDI_FindDevice(m_hEtronDI);
+-
+-	// Etron Get Device Num
+-	m_EtronDevNum = EtronDI_GetDeviceNumber(m_hEtronDI);
+-	if (m_EtronDevNum == 0)
+-		return (XN_STATUS_ERROR);
+-
+-	m_pDevInfo = new DEVINFORMATION[m_EtronDevNum];
+-
+-	DEVSELINFO DevSelInfo;
+-
+-	for (int i = 0; i < m_EtronDevNum; i++)
+-	{
+-		DevSelInfo.index = i;
+-		EtronDI_GetDeviceInfo(m_hEtronDI, &DevSelInfo, m_pDevInfo + i);
+-		
+-		printf("DepthLetv::DevName(%s) \n", m_pDevInfo[i].strDevName);
+-	}
+-
+-	m_DevSelInfo.index = 0;
+-
+-// 	// Etron Select Device
+-// 	int iRet = EtronDI_SelectDevice(m_hEtronDI, 1);
+-// 	m_DevSelInfo.index = 0;
+-// 	if (iRet != ETronDI_OK){
+-// 		return (XN_STATUS_ERROR);
+-// 	}
+-
+-	WORD DepthDataType = 2;
+-	if (EtronDI_SetDepthDataType(m_hEtronDI, &m_DevSelInfo, DepthDataType) != ETronDI_OK)
+-	{
+-		printf("EtronDI_SetDepthDataType Failed !!");
+-		return (XN_STATUS_ERROR);
+-	}		
+-
+- 	// Etron Open Device
+-	if (EtronDI_OpenDevice2(m_hEtronDI, &m_DevSelInfo, 0, 0, false, SUPPORTED_X_RES, SUPPORTED_Y_RES) != ETronDI_OK)
+-		return (XN_STATUS_ERROR);
+-
+-	// Get FW register (Addr:E0 - IR on/off)
+-	m_RegAddr = 224;
+-	m_Value = -1;
+-	m_flag = 0;
+-	m_flag |= FG_Address_2Byte;
+-	m_flag |= FG_Value_2Byte;
+-	EtronDI_GetFWRegister(m_hEtronDI, &m_DevSelInfo, m_RegAddr, &m_Value, m_flag);
+-
+-	m_Value = 4;
+-	EtronDI_SetFWRegister(m_hEtronDI, &m_DevSelInfo, m_RegAddr, m_Value, m_flag);
+-
+-	m_pDepthImgBuf = new unsigned char[SUPPORTED_X_RES* SUPPORTED_Y_RES * 2];
+-#elif TEST_CASE == 5
+-	//¡¨Ω”œ‡ª˙£¨≥ı ºªØœ‡ª˙
+-	rv = LibTOF_Connect();
+-	if (rv < 0)
+-	{
+-		printf(" LibTOF_Connect Failed\n");
+-		system("pause");
+-		return XN_STATUS_ERROR;
+-	}
+-
+-	//ªÒ»°…Ë±∏–≈œ¢£¨ÕºœÒøÌ∏ﬂ£¨…Ë±∏∞Ê±æ–≈œ¢
+-	DeviceInfo_t *deviceinfo = new DeviceInfo_t;//(DeviceInfo_t *)malloc(sizeof(DeviceInfo_t));
+-	memset(deviceinfo, 0, sizeof(DeviceInfo_t));
+-	rv = LibTOF_GetDeviceInfo(deviceinfo);
+-	if (rv < 0)
+-	{
+-		printf(" LibTOF_GetDeviceInfo Failed\n");
+-		system("pause");
+-		return XN_STATUS_ERROR;
+-	}
+-	else
+-	{
+-		DEPTHMAP_W = deviceinfo->DepthFrameWidth;
+-		DEPTHMAP_H = deviceinfo->DepthFrameHeight - 1;//ºı»•“ª––Õ∑≥§∂»
+-		DEPTHVIDEO_W = deviceinfo->VisibleFrameWidth;
+-		DEPTHVIDEO_H = deviceinfo->VisibleFrameHeight;
+-
+-		printf("deviceID:%s \ndeviceInfo:%s\nDepth Data:w-%d h-%d \nvisiableData:w-%d h-%d \nDeviceVersion:\n"
+-			, deviceinfo->DeviceId, deviceinfo->TofAlgVersion, DEPTHMAP_W, DEPTHMAP_H, DEPTHVIDEO_W, DEPTHVIDEO_H);
+-
+-		DEPTHVIDEO_FRAME_SIZE = ROUNDUP(DEPTHVIDEO_W*DEPTHVIDEO_H * 3 / 2 + DEPTHVIDEO_W, 1024);//Œ≤≤ø¥¯“ª––÷°–≈œ¢
+-
+-		frame_data = (FrameData_t*)malloc(sizeof(FrameData_t)*DEPTHMAP_W*DEPTHMAP_H + DEPTHMAP_W);
+-		memset(frame_data, 0, sizeof(FrameData_t)*DEPTHMAP_W*DEPTHMAP_H + DEPTHMAP_W);
+-
+-		frame_data_Rgb = (FrameDataRgb_t*)malloc(sizeof(FrameDataRgb_t)*DEPTHMAP_W*DEPTHMAP_H + DEPTHMAP_W);
+-		memset(frame_data_Rgb, 0, sizeof(FrameDataRgb_t)*DEPTHMAP_W*DEPTHMAP_H + DEPTHMAP_W);
+-	}
+-#elif TEST_CASE == TEST_TY
+-	componentIDs = TY_COMPONENT_DEPTH_CAM;
+-
+-	//CHECK(TYInitLib());//≥ı ºªØAPI
+-	ASSERT_OK(TYInitLib());
+-	//ªÒ»°API∞Ê±æ
+-	this->pVer = new TY_VERSION_INFO;
+-	ASSERT_OK(TYLibVersion(pVer));
+-	LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
+-
+-	//ªÒ»°…Ë±∏ ˝¡ø
+-	ASSERT_OK(TYGetDeviceNumber(&deviceNumber));
+-	LOGD("     - device number %d", deviceNumber);
+-
+-	//ªÒµ√…Ë±∏ª˘±æ–≈œ¢
+-	this->pDeviceBaseInfo = new TY_DEVICE_BASE_INFO[100];
+-	ASSERT_OK(TYGetDeviceList(pDeviceBaseInfo, 100, &deviceNumber));
+-	if (deviceNumber == 0)
+-		return XN_STATUS_ERROR;
+-
+-	//¥Úø™…Ë±∏
+-	ASSERT_OK(TYOpenDevice(pDeviceBaseInfo[0].id, &hDevice));
+-
+-	TY_FEATURE_INFO info;
+-	TY_STATUS ty_status;
+-	int32_t frameSize;
+-
+-	ASSERT_OK(TYEnableComponents(hDevice, componentIDs));
+-	//…Ë÷√…„œÒÕ∑≤Œ ˝
+-	//TYSetEnum(hDevice,componentIDs,enum_model,enum_model_value);
+-	TYSetEnum(hDevice, TY_COMPONENT_RGB_CAM_LEFT, TY_ENUM_IMAGE_MODE, TY_IMAGE_MODE_1280x960);
+-	TYSetEnum(hDevice, TY_COMPONENT_DEPTH_CAM, TY_ENUM_IMAGE_MODE, TY_IMAGE_MODE_640x480);
+-
+-// 	if (frameBuffer[0] != nullptr) delete[] frameBuffer[0];
+-// 	if (frameBuffer[1] != nullptr) delete[] frameBuffer[1];
+-
+-	//ªÒµ√“ª÷° ˝æ›µƒ¥Û–°
+-	TYGetFrameBufferSize(hDevice, &frameSize);
+-	frameBuffer[0] = new char[frameSize];
+-	frameBuffer[1] = new char[frameSize];
+-	//===Enqueue buffer =====
+-	TYEnqueueBuffer(hDevice, frameBuffer[0], frameSize);
+-	TYEnqueueBuffer(hDevice, frameBuffer[1], frameSize);
+-	//=====disable trigger model====
+-	ty_status = TYGetFeatureInfo(hDevice, TY_COMPONENT_DEVICE, TY_BOOL_TRIGGER_MODE, &info);
+-	if ((info.accessMode & TY_ACCESS_WRITABLE) && (ty_status == TY_STATUS_OK)) {
+-		ASSERT_OK(TYSetBool(hDevice, TY_COMPONENT_DEVICE, TY_BOOL_TRIGGER_MODE, false));
+-	}
+-
+-	//=====start capture====
+-	TYStartCapture(hDevice);
+-
+-	hasOpen = true;
+-
+-#endif
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-
+-XnStatus DepthLetv::UpdateData()
+-{
+-	//printf("DepthLetv::UpdateData() \n");
+-	XnStatus nRetVal = XN_STATUS_OK;
+-		
+-	XnDepthPixel* pPixel = m_pDepthMap;
+-
+-#if TEST_CASE == 0
+-	int ret = pCam->GetImageData(imgData, imgLen);
+-	if (ret > 0)
+-	{
+-		unsigned char* dispData = new unsigned char[width*height];
+-		for (int i = 0; i < height; i++)
+-		{
+-			//memcpy(left.data + width*i, img_data + (2 * i)*width, width);
+-			memcpy(dispData + width*i, imgData + (2 * i + 1)*width, width);
+-		}
+-		DisparityToDepth(dispData, height, width, m_pDepthMap);
+-
+-		delete[] dispData;
+-	}
+-	else if (ret == -1)
+-	{
+-		std::cout << "time out" << std::endl;
+-	}
+-#elif TEST_CASE == 1
+-	// get depth frame buffer
+-	CInuError ret = m_depthStream_Inu->GetFrame(m_depthFrame_Inu);
+-	if (ret != eOK)
+-	{
+-		cout << "Failed to acquire depth frame: " << string(ret) << endl;
+-		return XN_STATUS_ERROR;
+-	}
+-
+-	// depth data
+-	const InuDev::byte* pDepthRow = (const InuDev::byte*)m_depthFrame_Inu.GetData();
+-	int rowSize = m_depthFrame_Inu.Width() * m_depthFrame_Inu.BytesPerPixel();
+-
+-	memcpy(m_pDepthMap, pDepthRow, sizeof(InuDev::byte)*m_depthFrame_Inu.BytesPerPixel()*SUPPORTED_X_RES*SUPPORTED_Y_RES);
+-
+-#elif TEST_CASE == 2
+-	m_ADI_obj.ProcFrame(/*m_pDepthMap*/);
+-	memcpy(m_pDepthMap, m_ADI_obj.punDepth, sizeof(uint16)*SUPPORTED_X_RES*SUPPORTED_Y_RES);
+-#elif TEST_CASE == 3
+-	int nRet = EtronDI_GetImage(m_hEtronDI, &m_DevSelInfo, m_pDepthImgBuf, &m_depthSize, &m_DepthSerialNumber);
+-
+-	memcpy(m_pDepthMap, m_pDepthImgBuf, sizeof(BYTE)*SUPPORTED_X_RES*SUPPORTED_Y_RES*2);
+-#elif TEST_CASE == 5
+-	FrameData_t* frame_data_p;
+-	FrameDataRgb_t* frame_data_Rgb_tmp;
+-
+-	frame_data_p = frame_data;
+-	frame_data_Rgb_tmp = frame_data_Rgb;//MRAS04…Ë±∏£¨ª“∂»ƒ£ Ω ±£¨¥Ê∑≈µƒ «ª“∂» ˝æ›£¨√ø∏ˆœÒÀÿ’º2◊÷Ω⁄
+-
+-	int rs = LibTOF_RcvDepthFrame2(frame_data_p, frame_data_Rgb_tmp, DEPTHMAP_W, DEPTHMAP_H);
+-
+-	if (rs != LTOF_SUCCESS)
+-		return XN_STATUS_ERROR;
+-
+-	// Analysis Data
+-	for (int y = 0; y < DEPTHMAP_H; y++)
+-	{
+-		for (int x = 0; x < DEPTHVIDEO_W; x++)
+-		{
+-			m_pDepthMap[y*DEPTHMAP_W + x] = (int)(frame_data_p[y*DEPTHMAP_W + x].z * 1000.0f);
+-		}
+-	}
+-#elif TEST_CASE == TEST_TY
+-	int err = TYFetchFrame(hDevice, &frame, -1);
+-	for (int i = 0; i < frame.validCount; i++)
+-	{
+-		// get depth image
+-		if (frame.image[i].componentID == TY_COMPONENT_DEPTH_CAM)
+-		{
+-			memcpy(m_pDepthMap, frame.image[i].buffer, sizeof(BYTE)*SUPPORTED_X_RES*SUPPORTED_Y_RES * 2);
+-			break;
+-		}
+-	}
+-
+-	TYEnqueueBuffer(hDevice, frame.userBuffer, frame.bufferSize);
+-
+-#endif
+-
+-	// if needed, mirror the map
+-	if (0)
+-	{
+-		XnDepthPixel temp;
+-
+-		for (XnUInt y = 0; y < SUPPORTED_Y_RES; ++y)
+-		{
+-			XnDepthPixel* pUp = &m_pDepthMap[y * SUPPORTED_X_RES];
+-			XnDepthPixel* pDown = &m_pDepthMap[(y+1) * SUPPORTED_X_RES - 1];
+-
+-			for (XnUInt x = 0; x < SUPPORTED_X_RES/2; ++x, ++pUp, --pDown)
+-			{
+-				temp = *pUp;
+-				*pUp = *pDown;
+-				*pDown = temp;
+-			}
+-		}
+-	}
+-
+-	// Incrementa o n˙mero do frame, aplicaÁıes utilizam um get para obter este valor
+-	m_nFrameID++;
+-
+-	// Incrementa o n˙mero do Timestamp, aplicaÁıes utilizam um get para obter este valor
+-	m_nTimestamp += 1000000 / SUPPORTED_FPS;
+-
+-	// Mark that data is old
+-	m_bDataAvailable = FALSE;
+-	
+-	return (XN_STATUS_OK);
+-}
+-
+-XnBool DepthLetv::IsCapabilitySupported( const XnChar* strCapabilityName )
+-{
+-
+-	XnBool result;
+-
+-	// we only support the mirror capability
+-	result =  (strcmp(strCapabilityName, XN_CAPABILITY_MIRROR) == 0);
+-
+-
+-	/*result = (strcmp(strCapabilityName, XN_CAPABILITY_USER_POSITION) == 0 ||
+-		strcmp(strCapabilityName, XN_CAPABILITY_ALTERNATIVE_VIEW_POINT) == 0 ||
+-		strcmp(strCapabilityName, XN_CAPABILITY_FRAME_SYNC) == 0 ||
+-		strcmp(strCapabilityName, XN_CAPABILITY_CROPPING) == 0 );*/
+-
+-	//result =  (strcmp(strCapabilityName, XN_CAPABILITY_MIRROR) == 0 || 
+-		//strcmp(strCapabilityName, XN_CAPABILITY_CROPPING) == 0 ); 
+-
+-	 return result;
+-}
+-
+-XnStatus DepthLetv::StartGenerating()
+-{
+-	printf("DepthLetv::StartGenerating() \n");
+-	XnStatus nRetVal = XN_STATUS_OK;
+-	
+-	m_bGenerating = TRUE;
+-
+-	// start scheduler thread
+-	nRetVal = xnOSCreateThread(SchedulerThread, this, &m_hScheduler);
+-	if (nRetVal != XN_STATUS_OK)
+-	{
+-		m_bGenerating = FALSE;
+-		return (nRetVal);
+-	}
+-
+-	m_generatingEvent.Raise();
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-XnBool DepthLetv::IsGenerating()
+-{
+-	return m_bGenerating;
+-}
+-
+-void DepthLetv::StopGenerating()
+-{
+-	printf("DepthLetv::StopGenerating() \n");
+-	m_bGenerating = FALSE;
+-
+-	// wait for thread to exit
+-	xnOSWaitForThreadExit(m_hScheduler, 100);
+-
+-	m_generatingEvent.Raise();
+-}
+-
+-XnStatus DepthLetv::RegisterToGenerationRunningChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
+-{
+-	return m_generatingEvent.Register(handler, pCookie, &hCallback);
+-}
+-
+-void DepthLetv::UnregisterFromGenerationRunningChange( XnCallbackHandle hCallback )
+-{
+-	m_generatingEvent.Unregister(hCallback);
+-}
+-
+-XnStatus DepthLetv::RegisterToNewDataAvailable( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
+-{
+-	return m_dataAvailableEvent.Register(handler, pCookie, &hCallback);
+-}
+-
+-void DepthLetv::UnregisterFromNewDataAvailable( XnCallbackHandle hCallback )
+-{
+-	m_dataAvailableEvent.Unregister(hCallback);
+-}
+-
+-XnBool DepthLetv::IsNewDataAvailable( XnUInt64& nTimestamp )
+-{
+-	return m_bDataAvailable;
+-}
+-
+-XnUInt32 DepthLetv::GetDataSize()
+-{
+-	return (SUPPORTED_X_RES * SUPPORTED_Y_RES * sizeof(XnDepthPixel));
+-}
+-
+-XnUInt64 DepthLetv::GetTimestamp()
+-{
+-	return m_nTimestamp;
+-}
+-
+-XnUInt32 DepthLetv::GetFrameID()
+-{
+-	return m_nFrameID;
+-}
+-
+-xn::ModuleMirrorInterface* DepthLetv::GetMirrorInterface()
+-{
+-	return this;
+-}
+-
+-XnStatus DepthLetv::SetMirror( XnBool bMirror )
+-{
+-	m_bMirror = bMirror;
+-	m_mirrorEvent.Raise();
+-	return (XN_STATUS_OK);
+-}
+-
+-XnBool DepthLetv::IsMirrored()
+-{
+-	return m_bMirror;
+-}
+-
+-XnStatus DepthLetv::RegisterToMirrorChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
+-{
+-	return m_mirrorEvent.Register(handler, pCookie, &hCallback);
+-}
+-
+-void DepthLetv::UnregisterFromMirrorChange( XnCallbackHandle hCallback )
+-{
+-	m_mirrorEvent.Unregister(hCallback);
+-}
+-
+-XnUInt32 DepthLetv::GetSupportedMapOutputModesCount()
+-{
+-	// we only support a single mode
+-	return 1;
+-}
+-
+-XnStatus DepthLetv::GetSupportedMapOutputModes( XnMapOutputMode aModes[], XnUInt32& nCount )
+-{
+-	if (nCount < 1)
+-	{
+-		return XN_STATUS_OUTPUT_BUFFER_OVERFLOW;
+-	}
+-
+-	aModes[0].nXRes = SUPPORTED_X_RES;
+-	aModes[0].nYRes = SUPPORTED_Y_RES;
+-	aModes[0].nFPS = SUPPORTED_FPS;
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-XnStatus DepthLetv::SetMapOutputMode( const XnMapOutputMode& Mode )
+-{
+-
+-	// make sure this is our supported mode
+-	if (Mode.nXRes != SUPPORTED_X_RES ||
+-		Mode.nYRes != SUPPORTED_Y_RES ||
+-		Mode.nFPS != SUPPORTED_FPS)
+-	{
+-		printf("XN_STATUS_BAD_PARAM\n");
+-		return (XN_STATUS_BAD_PARAM);
+-	}
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-XnStatus DepthLetv::GetMapOutputMode( XnMapOutputMode& Mode )
+-{
+-	Mode.nXRes = SUPPORTED_X_RES;
+-	Mode.nYRes = SUPPORTED_Y_RES;
+-	Mode.nFPS = SUPPORTED_FPS;
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-XnStatus DepthLetv::RegisterToMapOutputModeChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
+-{
+-
+-	// no need. we only allow one mode
+-	hCallback = this;
+-	return XN_STATUS_OK;
+-}
+-
+-void DepthLetv::UnregisterFromMapOutputModeChange( XnCallbackHandle hCallback )
+-{
+-	// do nothing (we didn't really register)	
+-}
+-
+-XnDepthPixel* DepthLetv::GetDepthMap()
+-{
+-	return m_pDepthMap;
+-}
+-
+-XnDepthPixel DepthLetv::GetDeviceMaxDepth()
+-{
+-	//printf("GetDeviceMaxDepth\n");
+-	return MAX_DEPTH_VALUE;
+-}
+-
+-void DepthLetv::GetFieldOfView( XnFieldOfView& FOV )
+-{
+-	FOV.fHFOV = HFOV;
+-	FOV.fVFOV = VFOV;	 
+-}
+-
+-XnStatus DepthLetv::RegisterToFieldOfViewChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
+-{
+-	// no need. it never changes
+-	hCallback = this;
+-	return XN_STATUS_OK;
+-}
+-
+-void DepthLetv::UnregisterFromFieldOfViewChange( XnCallbackHandle hCallback )
+-{
+-	// do nothing (we didn't really register)	
+-}
+-
+-XN_THREAD_PROC DepthLetv::SchedulerThread( void* pCookie )
+-{
+-	DepthLetv* pThis = (DepthLetv*)pCookie;
+-
+-	while (pThis->m_bGenerating)
+-	{
+-		// wait 33 ms (to produce 30 FPS)
+-		xnOSSleep(1000000/SUPPORTED_FPS/1000);
+-
+-		pThis->OnNewFrame();
+-	}
+-
+-	XN_THREAD_PROC_RETURN(0);
+-}
+-
+-void DepthLetv::OnNewFrame()
+-{
+-	m_bDataAvailable = TRUE;
+-	m_dataAvailableEvent.Raise();
+-}
+-
+-// Esta funÁ„o retorna as propriedades inteiras do mÛdulo, ?necess·ria para o funcionamento das aplicaÁıes
+-XnStatus DepthLetv::GetIntProperty(const XnChar* strName, XnUInt64& nValue) const
+-{
+-	if (strcmp(strName, XN_STREAM_PROPERTY_MIN_DEPTH) == 0)
+-    {
+-		nValue = 0;
+-        return XN_STATUS_OK;
+-    }
+-	else if (strcmp(strName, XN_STREAM_PROPERTY_MAX_DEPTH) == 0)
+-    {
+-		nValue = MAX_DEPTH_VALUE;
+-        return XN_STATUS_OK;
+-    }	
+-    else
+-    {
+-        return xn::ModuleDepthGenerator::GetIntProperty(strName, nValue);
+-    }
+-}
+-
+-// Esta funÁ„o retorna as propriedades reais do mÛdulo, ?necess·ria para o funcionamento das aplicaÁıes
+-XnStatus DepthLetv::GetRealProperty(const XnChar* strName, XnDouble& dValue) const
+-{
+-	return xn::ModuleDepthGenerator::GetRealProperty(strName, dValue);
+-}
+-
+-
+-// Esta funÁ„o retorna as propriedades de string do mÛdulo
+-XnStatus DepthLetv::GetStringProperty(const XnChar* strName, XnChar* csValue, XnUInt32 nBufSize) const { 
+-
+-	return xn::ModuleDepthGenerator::GetStringProperty(strName, csValue, nBufSize);
+-
+-}
+-
+-// Esta funÁ„o retorna outras propriedades do mÛdulo (como as matrizes de convers„o), ?necess·ria para o funcionamento das aplicaÁıes
+-XnStatus DepthLetv::GetGeneralProperty(const XnChar* strName, XnUInt32 nBufferSize, void* pBuffer) const { 
+-	return xn::ModuleDepthGenerator::GetGeneralProperty(strName, nBufferSize, pBuffer);	
+-}
+-
+-/*
+-XnStatus DepthLetv::SetCropping(const XnCropping &Cropping)
+-{
+-	//printf ("SetCropping\n");
+-	//printf("nXOffset: %d, nYOffset: %d, nXSize: %d, nYSize: %d\n\n", Cropping.nXOffset, Cropping.nYOffset, Cropping.nXSize, Cropping.nYSize);
+-	crop = XnGeneralBufferPack((void*)&Cropping, sizeof(Cropping));
+-	//crop2 = (XnCropping*)&Cropping;
+-	return XN_STATUS_OK; //m_pSensor->SetProperty(m_strModule, XN_STREAM_PROPERTY_CROPPING, gbValue);
+-}
+-
+-
+-XnStatus DepthLetv::GetCropping(XnCropping &Cropping)
+-{
+-	//printf ("GetCropping\n");
+-	//printf("nXOffset: %d, nYOffset: %d, nXSize: %d, nYSize: %d\n\n", Cropping.nXOffset, Cropping.nYOffset, Cropping.nXSize, Cropping.nYSize);
+-	XN_PACK_GENERAL_BUFFER(Cropping);
+-	Cropping = (XnCropping &)crop.pData;
+-
+-	//Cropping = (XnCropping &)crop2;
+-	return XN_STATUS_OK; // m_pSensor->GetProperty(m_strModule, XN_STREAM_PROPERTY_CROPPING, XN_PACK_GENERAL_BUFFER(Cropping));
+-}
+-
+-XnStatus DepthLetv::RegisterToCroppingChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback)
+-{
+-	//printf ("RegisterToCroppingChange\n");
+-	const XnChar* aProps[] = 
+-	{
+-		XN_CAPABILITY_CROPPING,
+-		NULL
+-	};
+-
+-	return XN_STATUS_OK; //RegisterToProps(handler, pCookie, hCallback, aProps);
+-}
+-
+-void DepthLetv::UnregisterFromCroppingChange(XnCallbackHandle hCallback)
+-{
+-	//printf ("UnregisterFromCroppingChange\n");
+-	//UnregisterFromProps(hCallback);
+-}
+-*/
+-
+-/*XnStatus XnPixelStream::CropImpl(XnStreamData* pStreamOutput, const XnCropping* pCropping)
+-{
+-	XnStatus nRetVal = XN_STATUS_OK;
+-
+-	XnUChar* pPixelData = (XnUChar*)pStreamOutput->pData;
+-	XnUInt32 nCurDataSize = 0;
+-
+-	for (XnUInt32 y = pCropping->nYOffset; y < XnUInt32(pCropping->nYOffset + pCropping->nYSize); ++y)
+-	{
+-		XnUChar* pOrigLine = &pPixelData[y * GetXRes() * GetBytesPerPixel()];
+-
+-		// move line
+-		xnOSMemCopy(pPixelData + nCurDataSize, pOrigLine + pCropping->nXOffset * GetBytesPerPixel(), pCropping->nXSize * GetBytesPerPixel());
+-		nCurDataSize += pCropping->nXSize * GetBytesPerPixel();
+-	}
+-
+-	// update size
+-	pStreamOutput->nDataSize = nCurDataSize;
+-
+-	return XN_STATUS_OK;
+-}*/
+diff -urN neolixDepthModule/DepthLetv.h neolixDepthModuleDemo/DepthLetv.h
+--- neolixDepthModule/DepthLetv.h	2017-12-05 14:46:33.180528052 +0800
++++ neolixDepthModuleDemo/DepthLetv.h	1970-01-01 08:30:00.000000000 +0830
+@@ -1,206 +0,0 @@
+-/*****************************************************************************
+-*                                                                            *
+-*  Copyright (C) 2017 Letv.                                                  *
+-*                                                                            *
+-*  This is afree software: you can redistribute it and/or modify             *
+-*  it under the terms of the GNU Lesser General Public License as published  *
+-*  by the Free Software Foundation, either version 3 of the License, or      *
+-*  (at your option) any later version.                                       *
+-*                                                                            *
+-*  This is distributed in the hope that it will be useful,                   *
+-*  but WITHOUT ANY WARRANTY; without even the implied warranty of            *
+-*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the              *
+-*  GNU Lesser General Public License for more details.                       *
+-*                                                                            *
+-*  You should see a copy of the GNU Lesser General Public License			 *
+-*  in <http://www.gnu.org/licenses/>.										 *
+-*                                                                            *
+-*****************************************************************************/
+-
+-
+-#include <XnModuleCppInterface.h>
+-#include <XnEvent.h>
+-#include <XnOS.h>
+-
+-#include <math.h>
+-#include <iostream>
+-#include <stdio.h>
+-//#include <windows.h>  //platform specific
+-
+-
+-#include "base.h"
+-
+-
+-#if TEST_CASE == TEST_HUMANPLUS
+-#include "MoveSenseCamera.h"
+-#include "CameraCtrl.h"
+-using namespace movesense;
+-
+-#elif TEST_CASE == TEST_INUITIVE
+-#include "InuSensor.h"
+-#include "DepthStream.h"
+-#include "InuError.h"
+-using namespace InuDev;
+-
+-#elif TEST_CASE == TEST_ADI
+-#include "types.h"
+-#include "ADI_TOF.h"
+-
+-#elif TEST_CASE == TEST_ESPDI
+-#include "eSPDI.h"
+-
+-#elif TEST_CASE == TEST_SUNNYMARS
+-#include "libTof.h"
+-
+-#elif TEST_CASE == TEST_TY
+-#include "common.hpp"
+-
+-#endif
+-#define ROUNDUP(x,n) ((x+n-1)&(~(n-1)))
+-
+-//---------------------------------------------------------------------------
+-// Depth Specific Properties
+-//---------------------------------------------------------------------------
+-/** Integer */ 
+-#define XN_STREAM_PROPERTY_GAIN						"Gain"
+-/** Integer */ 
+-#define XN_STREAM_PROPERTY_MIN_DEPTH				"MinDepthValue"
+-/** Integer */ 
+-#define XN_STREAM_PROPERTY_MAX_DEPTH				"MaxDepthValue"
+-
+-class DepthLetv : 
+-	public virtual xn::ModuleDepthGenerator,
+-	public virtual xn::ModuleMirrorInterface
+-	//public virtual xn::ModuleCroppingInterface
+-	//public virtual xn::ModuleProductionNode
+-{
+-public:
+-	DepthLetv();
+-	virtual ~DepthLetv();
+-
+-	XnStatus Init();
+-
+-	// ProductionNode methods
+-	virtual XnBool IsCapabilitySupported(const XnChar* strCapabilityName);
+-
+-	// Generator methods
+-	virtual XnStatus StartGenerating();
+-	virtual XnBool IsGenerating();
+-	virtual void StopGenerating();
+-	virtual XnStatus RegisterToGenerationRunningChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
+-	virtual void UnregisterFromGenerationRunningChange(XnCallbackHandle hCallback);
+-	virtual XnStatus RegisterToNewDataAvailable(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
+-	virtual void UnregisterFromNewDataAvailable(XnCallbackHandle hCallback);
+-	virtual XnBool IsNewDataAvailable(XnUInt64& nTimestamp);
+-	virtual XnStatus UpdateData();
+-	virtual XnUInt32 GetDataSize();
+-	virtual XnUInt64 GetTimestamp();
+-	virtual XnUInt32 GetFrameID();
+-	virtual xn::ModuleMirrorInterface* GetMirrorInterface();
+-
+-	// Mirror methods
+-	virtual XnStatus SetMirror(XnBool bMirror);
+-	virtual XnBool IsMirrored();
+-	virtual XnStatus RegisterToMirrorChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
+-	virtual void UnregisterFromMirrorChange(XnCallbackHandle hCallback);
+-
+-	// MapGenerator methods
+-	virtual XnUInt32 GetSupportedMapOutputModesCount();
+-	virtual XnStatus GetSupportedMapOutputModes(XnMapOutputMode aModes[], XnUInt32& nCount);
+-	virtual XnStatus SetMapOutputMode(const XnMapOutputMode& Mode);
+-	virtual XnStatus GetMapOutputMode(XnMapOutputMode& Mode);
+-	virtual XnStatus RegisterToMapOutputModeChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
+-	virtual void UnregisterFromMapOutputModeChange(XnCallbackHandle hCallback);
+-
+-	// DepthGenerator methods
+-	virtual XnDepthPixel* GetDepthMap();
+-	virtual XnDepthPixel GetDeviceMaxDepth();
+-	virtual void GetFieldOfView(XnFieldOfView& FOV);
+-	virtual XnStatus RegisterToFieldOfViewChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
+-	virtual void UnregisterFromFieldOfViewChange(XnCallbackHandle hCallback);
+-
+-	// FunÁıes que retornam as propriedades da c‚mera
+-	virtual XnStatus GetIntProperty(const XnChar* strName, XnUInt64& nValue) const;
+-	virtual XnStatus GetRealProperty(const XnChar* strName, XnDouble& dValue) const;
+-	virtual XnStatus GetStringProperty(const XnChar* strName, XnChar* csValue, XnUInt32 nBufSize) const;
+-	virtual XnStatus GetGeneralProperty(const XnChar* strName, XnUInt32 nBufferSize, void* pBuffer) const;
+-
+-	//virtual void DisparityToDepth(const unsigned char* disparity, XnUInt32 rowNumber, XnUInt32 colNumber, XnDepthPixel* pDepth);
+-
+-private:
+-
+-#if TEST_CASE == TEST_HUMANPLUS
+-	// HumanPlus define
+-	movesense::MoveSenseCamera *pCam;
+-#elif TEST_CASE == TEST_INUITIVE
+-	// Inuitive define
+-	std::shared_ptr<InuDev::CInuSensor>  m_device_Inu;
+-	std::shared_ptr<InuDev::CDepthStream>  m_depthStream_Inu;
+-	InuDev::CImageFrame m_depthFrame_Inu;
+-#elif TEST_CASE == TEST_ADI
+-	ADI_TOF m_ADI_obj;
+-#elif TEST_CASE == TEST_ESPDI
+-	void*				m_hEtronDI;
+-	DEVSELINFO			m_DevSelInfo;
+-	DEVINFORMATION		*m_pDevInfo;
+-	int					m_EtronDevNum;
+-	int					m_EtronStreamMode;
+-	int					m_flag;
+-	unsigned short		m_RegAddr;
+-	unsigned short		m_Value;
+-	unsigned char		*m_pDepthImgBuf;
+-	unsigned long		m_depthSize;
+-	int					m_DepthSerialNumber;
+-#elif TEST_CASE == TEST_SUNNYMARS
+-	int rv;
+-	int DEPTHMAP_W;
+-	int DEPTHMAP_H;
+-	int DEPTHVIDEO_W;
+-	int DEPTHVIDEO_H;
+-	int DEPTHVIDEO_FRAME_SIZE;
+-	FrameData_t* frame_data;
+-	short* grey_data;
+-	FrameDataRgb_t* frame_data_Rgb;
+-	unsigned char	*PColorbuffer_s;
+-	int Camera_Mode;  //ƒ¨»œŒ™À´∆µƒ£ Ω
+-#elif TEST_CASE == TEST_TY
+-	int deviceNumber;//…Ë±∏ ˝¡ø
+-	TY_VERSION_INFO * pVer;//api∞Ê±æ
+-	TY_DEVICE_BASE_INFO* pDeviceBaseInfo;//…Ë±∏µƒª˘¥°–≈œ¢
+-	TY_DEV_HANDLE hDevice;//…Ë±∏µƒæ‰±˙
+-	int32_t componentIDs;//◊Èº˛IDs
+-	int32_t enum_model;
+-	int32_t enum_model_value;
+-	bool printLog;
+-	std::string logFile;
+-	bool hasOpen;
+-	char* frameBuffer[2];
+-	TY_FRAME_DATA frame;
+-#endif
+-
+-	XnUInt32 width;
+-	XnUInt32 height;
+-	unsigned char * imgData;
+-	int imgLen;
+-	XnDepthPixel * depthImgData;
+-
+-	XN_DECLARE_EVENT_0ARG(ChangeEvent, ChangeEventInterface);
+-
+-	static XN_THREAD_PROC SchedulerThread(void* pCookie);
+-	void OnNewFrame();
+-
+-	XnBool m_bGenerating;
+-	XnBool m_bDataAvailable;
+-	XnDepthPixel* m_pDepthMap;
+-	XnUInt32 m_nFrameID;
+-	XnUInt64 m_nTimestamp;
+-	XN_THREAD_HANDLE m_hScheduler;
+-	XnBool m_bMirror;
+-	ChangeEvent m_generatingEvent;
+-	ChangeEvent m_dataAvailableEvent;
+-	ChangeEvent m_mirrorEvent;
+-	
+-	// Cropping
+-	/*XnGeneralBuffer crop;
+-	XnCropping *crop2;*/
+-};
+diff -urN neolixDepthModule/ExportedDepthLetv.cpp neolixDepthModuleDemo/ExportedDepthLetv.cpp
+--- neolixDepthModule/ExportedDepthLetv.cpp	2017-12-05 14:46:33.188528052 +0800
++++ neolixDepthModuleDemo/ExportedDepthLetv.cpp	1970-01-01 08:30:00.000000000 +0830
+@@ -1,76 +0,0 @@
+-/*****************************************************************************
+-*                                                                            *
+-*  Copyright (C) 2017 Letv.                                                  *
+-*                                                                            *
+-*  This is afree software: you can redistribute it and/or modify             *
+-*  it under the terms of the GNU Lesser General Public License as published  *
+-*  by the Free Software Foundation, either version 3 of the License, or      *
+-*  (at your option) any later version.                                       *
+-*                                                                            *
+-*  This is distributed in the hope that it will be useful,                   *
+-*  but WITHOUT ANY WARRANTY; without even the implied warranty of            *
+-*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the              *
+-*  GNU Lesser General Public License for more details.                       *
+-*                                                                            *
+-*  You should see a copy of the GNU Lesser General Public License			 *
+-*  in <http://www.gnu.org/licenses/>.										 *
+-*                                                                            *
+-*****************************************************************************/
+-
+-
+-#include "ExportedDepthLetv.h"
+-#include "DepthLetv.h"
+-
+-ExportedDepthLetv::ExportedDepthLetv()
+-{}
+-
+-void ExportedDepthLetv::GetDescription( XnProductionNodeDescription* pDescription )
+-{
+-	pDescription->Type = XN_NODE_TYPE_DEPTH;
+-	strcpy(pDescription->strVendor, "Letv");
+-	strcpy(pDescription->strName, "DepthCamera");
+-	pDescription->Version.nMajor = 5;
+-	pDescription->Version.nMinor = XN_MINOR_VERSION;
+-	pDescription->Version.nMaintenance = XN_MAINTENANCE_VERSION;
+-	pDescription->Version.nBuild = XN_BUILD_VERSION;
+-}
+-
+-XnStatus ExportedDepthLetv::EnumerateProductionTrees( xn::Context& context, xn::NodeInfoList& TreesList, xn::EnumerationErrors* pErrors )
+-{
+-	XnStatus nRetVal = XN_STATUS_OK;
+-
+-	// return one option
+-	XnProductionNodeDescription desc;
+-	GetDescription(&desc);
+-
+-	// Talvez devesse ser maior
+-	nRetVal = TreesList.Add(desc, NULL, NULL);
+-	XN_IS_STATUS_OK(nRetVal);
+-
+-
+-	return (XN_STATUS_OK);
+-}
+-
+-XnStatus ExportedDepthLetv::Create( xn::Context& context, const XnChar* strInstanceName, const XnChar* strCreationInfo, xn::NodeInfoList* pNeededTrees, const XnChar* strConfigurationDir, xn::ModuleProductionNode** ppInstance )
+-{
+-	XnStatus nRetVal = XN_STATUS_OK;
+-	
+-	DepthLetv* pDepth = new DepthLetv();
+-
+-	nRetVal = pDepth->Init();
+-	if (nRetVal != XN_STATUS_OK)
+-	{
+-		delete pDepth;
+-		return (nRetVal);
+-	}
+-
+-	*ppInstance = pDepth;
+-
+-	
+-	return (XN_STATUS_OK);
+-}
+-
+-void ExportedDepthLetv::Destroy( xn::ModuleProductionNode* pInstance )
+-{
+-	delete pInstance;
+-}
+\ No newline at end of file
+diff -urN neolixDepthModule/ExportedDepthLetv.h neolixDepthModuleDemo/ExportedDepthLetv.h
+--- neolixDepthModule/ExportedDepthLetv.h	2017-12-05 14:46:33.260528053 +0800
++++ neolixDepthModuleDemo/ExportedDepthLetv.h	1970-01-01 08:30:00.000000000 +0830
+@@ -1,31 +0,0 @@
+-/*****************************************************************************
+-*                                                                            *
+-*  Copyright (C) 2017 Letv.                                                  *
+-*                                                                            *
+-*  This is afree software: you can redistribute it and/or modify             *
+-*  it under the terms of the GNU Lesser General Public License as published  *
+-*  by the Free Software Foundation, either version 3 of the License, or      *
+-*  (at your option) any later version.                                       *
+-*                                                                            *
+-*  This is distributed in the hope that it will be useful,                   *
+-*  but WITHOUT ANY WARRANTY; without even the implied warranty of            *
+-*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the              *
+-*  GNU Lesser General Public License for more details.                       *
+-*                                                                            *
+-*  You should see a copy of the GNU Lesser General Public License			 *
+-*  in <http://www.gnu.org/licenses/>.										 *
+-*                                                                            *
+-*****************************************************************************/
+-
+-
+-#include <XnModuleCppInterface.h>
+-
+-class ExportedDepthLetv : public xn::ModuleExportedProductionNode
+-{
+-public:
+-	ExportedDepthLetv();
+-	virtual void GetDescription(XnProductionNodeDescription* pDescription);
+-	virtual XnStatus EnumerateProductionTrees(xn::Context& context, xn::NodeInfoList& TreesList, xn::EnumerationErrors* pErrors);
+-	virtual XnStatus Create(xn::Context& context, const XnChar* strInstanceName, const XnChar* strCreationInfo, xn::NodeInfoList* pNeededTrees, const XnChar* strConfigurationDir, xn::ModuleProductionNode** ppInstance);
+-	virtual void Destroy(xn::ModuleProductionNode* pInstance);
+-};
+\ No newline at end of file
+diff -urN neolixDepthModule/ExportedNeolixDepth.cpp neolixDepthModuleDemo/ExportedNeolixDepth.cpp
+--- neolixDepthModule/ExportedNeolixDepth.cpp	1970-01-01 08:30:00.000000000 +0830
++++ neolixDepthModuleDemo/ExportedNeolixDepth.cpp	2017-12-05 14:46:32.184528032 +0800
+@@ -0,0 +1,70 @@
++/*****************************************************************************
++*                                                                            *
++*  OpenNI 1.x Alpha                                                          *
++*  Copyright (C) 2012 PrimeSense Ltd.                                        *
++*                                                                            *
++*  This file is part of OpenNI.                                              *
++*                                                                            *
++*  Licensed under the Apache License, Version 2.0 (the "License");           *
++*  you may not use this file except in compliance with the License.          *
++*  You may obtain a copy of the License at                                   *
++*                                                                            *
++*      http://www.apache.org/licenses/LICENSE-2.0                            *
++*                                                                            *
++*  Unless required by applicable law or agreed to in writing, software       *
++*  distributed under the License is distributed on an "AS IS" BASIS,         *
++*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  *
++*  See the License for the specific language governing permissions and       *
++*  limitations under the License.                                            *
++*                                                                            *
++*****************************************************************************/
++#include "ExportedNeolixDepth.h"
++#include "NeolixDepth.h"
++
++void ExportedNeolixDepth::GetDescription( XnProductionNodeDescription* pDescription )
++{
++	pDescription->Type = XN_NODE_TYPE_DEPTH;
++	strcpy(pDescription->strVendor, "Neolix");
++	strcpy(pDescription->strName, "NeolixDepth");
++	pDescription->Version.nMajor = XN_MAJOR_VERSION;
++	pDescription->Version.nMinor = XN_MINOR_VERSION;
++	pDescription->Version.nMaintenance = XN_MAINTENANCE_VERSION;
++	pDescription->Version.nBuild = XN_BUILD_VERSION;
++}
++
++XnStatus ExportedNeolixDepth::EnumerateProductionTrees( xn::Context& /*context*/, xn::NodeInfoList& TreesList, xn::EnumerationErrors* /*pErrors*/ )
++{
++	XnStatus nRetVal = XN_STATUS_OK;
++
++	// return one option
++	XnProductionNodeDescription desc;
++	GetDescription(&desc);
++
++	nRetVal = TreesList.Add(desc, NULL, NULL);
++	XN_IS_STATUS_OK(nRetVal);
++
++	return (XN_STATUS_OK);
++}
++
++XnStatus ExportedNeolixDepth::Create( xn::Context& /*context*/, const XnChar* /*strInstanceName*/, const XnChar* /*strCreationInfo*/, xn::NodeInfoList* /*pNeededTrees*/, const XnChar* /*strConfigurationDir*/, xn::ModuleProductionNode** ppInstance )
++{
++	XnStatus nRetVal = XN_STATUS_OK;
++	
++	NeolixDepth* pDepth = new NeolixDepth();
++
++	nRetVal = pDepth->Init();
++	if (nRetVal != XN_STATUS_OK)
++	{
++		delete pDepth;
++		return (nRetVal);
++	}
++
++	*ppInstance = pDepth;
++	
++	return (XN_STATUS_OK);
++}
++
++void ExportedNeolixDepth::Destroy( xn::ModuleProductionNode* pInstance )
++{
++	delete pInstance;
++}
+diff -urN neolixDepthModule/ExportedNeolixDepth.h neolixDepthModuleDemo/ExportedNeolixDepth.h
+--- neolixDepthModule/ExportedNeolixDepth.h	1970-01-01 08:30:00.000000000 +0830
++++ neolixDepthModuleDemo/ExportedNeolixDepth.h	2017-12-05 14:46:32.160528032 +0800
+@@ -0,0 +1,30 @@
++/*****************************************************************************
++*                                                                            *
++*  OpenNI 1.x Alpha                                                          *
++*  Copyright (C) 2012 PrimeSense Ltd.                                        *
++*                                                                            *
++*  This file is part of OpenNI.                                              *
++*                                                                            *
++*  Licensed under the Apache License, Version 2.0 (the "License");           *
++*  you may not use this file except in compliance with the License.          *
++*  You may obtain a copy of the License at                                   *
++*                                                                            *
++*      http://www.apache.org/licenses/LICENSE-2.0                            *
++*                                                                            *
++*  Unless required by applicable law or agreed to in writing, software       *
++*  distributed under the License is distributed on an "AS IS" BASIS,         *
++*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  *
++*  See the License for the specific language governing permissions and       *
++*  limitations under the License.                                            *
++*                                                                            *
++*****************************************************************************/
++#include <XnModuleCppInterface.h>
++
++class ExportedNeolixDepth : public xn::ModuleExportedProductionNode
++{
++public:
++	virtual void GetDescription(XnProductionNodeDescription* pDescription);
++	virtual XnStatus EnumerateProductionTrees(xn::Context& context, xn::NodeInfoList& TreesList, xn::EnumerationErrors* pErrors);
++	virtual XnStatus Create(xn::Context& context, const XnChar* strInstanceName, const XnChar* strCreationInfo, xn::NodeInfoList* pNeededTrees, const XnChar* strConfigurationDir, xn::ModuleProductionNode** ppInstance);
++	virtual void Destroy(xn::ModuleProductionNode* pInstance);
++};
+diff -urN neolixDepthModule/log neolixDepthModuleDemo/log
+--- neolixDepthModule/log	1970-01-01 08:30:00.000000000 +0830
++++ neolixDepthModuleDemo/log	2017-12-05 14:46:32.208528033 +0800
+@@ -0,0 +1,247 @@
++NeolixDepth.cpp:73:	LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++NeolixDepth.cpp:77:	LOGD("     - device number %d", deviceNumber);
++ty_sdk/sample/SimpleView_Callback/main.cpp:22:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/SimpleView_Callback/main.cpp:44:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_Callback/main.cpp:50:    LOGD("=== Device Status Calllback: sys_reset %d, phy_reset %d", device_status->sysResetCounter, device_status->phyResetCounter);
++ty_sdk/sample/SimpleView_Callback/main.cpp:70:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_Callback/main.cpp:74:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_Callback/main.cpp:77:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/SimpleView_Callback/main.cpp:81:            LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_Callback/main.cpp:84:            LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_Callback/main.cpp:90:                LOGD("=== No device got");
++ty_sdk/sample/SimpleView_Callback/main.cpp:96:        LOGD("=== Open device: %s", ID);
++ty_sdk/sample/SimpleView_Callback/main.cpp:103:        LOGD("=== Has RGB camera, open RGB cam");
++ty_sdk/sample/SimpleView_Callback/main.cpp:107:    LOGD("=== Configure components, open depth cam");
++ty_sdk/sample/SimpleView_Callback/main.cpp:113:    LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/SimpleView_Callback/main.cpp:114:    LOGD("Note: DM460 resolution feature is in component TY_COMPONENT_DEVICE,");
++ty_sdk/sample/SimpleView_Callback/main.cpp:115:    LOGD("      other device may lays in some other components.");
++ty_sdk/sample/SimpleView_Callback/main.cpp:119:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_Callback/main.cpp:122:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_Callback/main.cpp:125:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_Callback/main.cpp:129:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/SimpleView_Callback/main.cpp:131:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/SimpleView_Callback/main.cpp:134:    LOGD("=== Register frame callback");
++ty_sdk/sample/SimpleView_Callback/main.cpp:135:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_Callback/main.cpp:136:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_Callback/main.cpp:137:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/SimpleView_Callback/main.cpp:138:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/SimpleView_Callback/main.cpp:148:    LOGD("=== Register device status callback");
++ty_sdk/sample/SimpleView_Callback/main.cpp:149:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_Callback/main.cpp:150:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_Callback/main.cpp:153:    LOGD("=== Disable trigger mode");
++ty_sdk/sample/SimpleView_Callback/main.cpp:156:    LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_Callback/main.cpp:159:    LOGD("=== Wait for callback");
++ty_sdk/sample/SimpleView_Callback/main.cpp:208:                LOGD("Unmapped key %d", key);
++ty_sdk/sample/SimpleView_Callback/main.cpp:218:    LOGD("=== Main done!");
++ty_sdk/sample/DumpAllFeatures/main.cpp:12:        LOGD("===         %s: comp(0x%x) feat(0x%x) name(%s) access(%d) bindComponent(0x%x) bindFeature(0x%x)"
++ty_sdk/sample/DumpAllFeatures/main.cpp:18:            LOGD("===         %14s: %d", "", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:23:            LOGD("===         %14s: %f", "", v);
++ty_sdk/sample/DumpAllFeatures/main.cpp:27:            LOGD("===         %14s: entry count %d", "", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:32:                    LOGD("===         %14s:     value(%d), desc(%s)", "", pEntry[i].value, pEntry[i].description);
++ty_sdk/sample/DumpAllFeatures/main.cpp:40:            LOGD("===         %14s: %d", "", v);
++ty_sdk/sample/DumpAllFeatures/main.cpp:44:            LOGD("===         %14s: length(%d)", "", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:46:            LOGD("===         %14s: content(%s)", "", buffer);
++ty_sdk/sample/DumpAllFeatures/main.cpp:51:            LOGD("===         %14s: size(%d)", "", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:54:            LOGD("===         %14s: size %d", "", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:63:                    LOGD("===%23s%f %f %f", "", p->data[0], p->data[1], p->data[2]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:64:                    LOGD("===%23s%f %f %f", "", p->data[3], p->data[4], p->data[5]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:65:                    LOGD("===%23s%f %f %f", "", p->data[6], p->data[7], p->data[8]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:73:                    LOGD("===%23s%f %f %f %f", "", p->data[0], p->data[1], p->data[2], p->data[3]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:74:                    LOGD("===%23s%f %f %f %f", "", p->data[4], p->data[5], p->data[6], p->data[7]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:75:                    LOGD("===%23s%f %f %f %f", "", p->data[8], p->data[9], p->data[10], p->data[11]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:76:                    LOGD("===%23s%f %f %f %f", "", p->data[12], p->data[13], p->data[14], p->data[15]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:83:                    LOGD("===%23s%f %f %f %f", "", p->data[0], p->data[1], p->data[2], p->data[3]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:84:                    LOGD("===%23s%f %f %f %f", "", p->data[4], p->data[5], p->data[6], p->data[7]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:85:                    LOGD("===%23s%f %f %f %f", "", p->data[8], p->data[9], p->data[10], p->data[11]);
++ty_sdk/sample/DumpAllFeatures/main.cpp:89:                    LOGD("===         %s: Unknown struct", name);
++ty_sdk/sample/DumpAllFeatures/main.cpp:135:                                                    LOGD("===  %s:",#id);\
++ty_sdk/sample/DumpAllFeatures/main.cpp:144:    LOGD("=== Dump all components and features:");
++ty_sdk/sample/DumpAllFeatures/main.cpp:177:    LOGD("=== lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/DumpAllFeatures/main.cpp:181:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/DumpAllFeatures/main.cpp:185:        LOGD("===   device %s:", IP);
++ty_sdk/sample/DumpAllFeatures/main.cpp:186:        LOGD("===       interface  : %d", pBaseInfo[0].devInterface);
++ty_sdk/sample/DumpAllFeatures/main.cpp:187:        LOGD("===       id         : %s", pBaseInfo[0].id);
++ty_sdk/sample/DumpAllFeatures/main.cpp:188:        LOGD("===       vendor     : %s", pBaseInfo[0].vendorName);
++ty_sdk/sample/DumpAllFeatures/main.cpp:189:        LOGD("===       model      : %s", pBaseInfo[0].modelName);
++ty_sdk/sample/DumpAllFeatures/main.cpp:190:        LOGD("===       HW version : %d.%d.%d"
++ty_sdk/sample/DumpAllFeatures/main.cpp:195:        LOGD("===       FW version : %d.%d.%d"
++ty_sdk/sample/DumpAllFeatures/main.cpp:205:            LOGD("=== device number %d", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:210:                LOGD("=== No device got");
++ty_sdk/sample/DumpAllFeatures/main.cpp:216:        LOGD("=== get device list %d:", n);
++ty_sdk/sample/DumpAllFeatures/main.cpp:218:            LOGD("===   device %d:", i);
++ty_sdk/sample/DumpAllFeatures/main.cpp:219:            LOGD("===       interface  : %d", pBaseInfo[i].devInterface);
++ty_sdk/sample/DumpAllFeatures/main.cpp:220:            LOGD("===       id         : %s", pBaseInfo[i].id);
++ty_sdk/sample/DumpAllFeatures/main.cpp:221:            LOGD("===       vendor     : %s", pBaseInfo[i].vendorName);
++ty_sdk/sample/DumpAllFeatures/main.cpp:222:            LOGD("===       model      : %s", pBaseInfo[i].modelName);
++ty_sdk/sample/DumpAllFeatures/main.cpp:223:            LOGD("===       HW version : %d.%d.%d"
++ty_sdk/sample/DumpAllFeatures/main.cpp:228:            LOGD("===       FW version : %d.%d.%d"
++ty_sdk/sample/DumpAllFeatures/main.cpp:235:        LOGD("=== Open device: %s", ID);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:52:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:76:        LOGD("Unmapped key %d", key);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:79:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:96:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:100:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:103:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:106:        LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:108:        LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:114:            LOGD("=== No device got");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:118:        LOGD("=== Open device 0");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:126:        LOGD("=== Has RGB camera, open RGB cam");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:130:    LOGD("=== Configure components, open depth cam");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:135:    LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:136:    LOGD("Note: DM460 resolution feature is in component TY_COMPONENT_DEVICE,");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:137:    LOGD("      other device may lays in some other components.");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:145:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:148:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:151:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:155:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:157:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:160:    LOGD("=== Register callback");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:161:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:162:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:163:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:164:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:172:    LOGD("=== Disable trigger mode");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:178:    LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:181:    LOGD("=== While loop to fetch frame");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:188:            LOGD("... Drop one frame");
++ty_sdk/sample/SimpleView_FetchFrame/main.cpp:201:    LOGD("=== Main done!");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:19:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:31:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:52:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:56:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:59:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:62:        LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:64:        LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:70:            LOGD("=== No device got");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:74:        LOGD("=== Open device 0");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:81:        // LOGD("=== Has RGB camera, open RGB cam");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:85:    LOGD("=== Configure components, open depth cam");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:89:    LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:90:    LOGD("Note: DM460 resolution feature is in component TY_COMPONENT_DEVICE,");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:91:    LOGD("      other device may lays in some other components.");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:95:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:98:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:101:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:105:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:107:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:110:    LOGD("=== Register callback");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:111:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:112:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:113:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:114:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:122:    LOGD("=== Enable trigger mode");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:125:    LOGD("=== Enable left ir undistort");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:128:    LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:131:    LOGD("=== Loop for send trigger signal");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:136:            LOGD("--- press any key to trigger:");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:144:                LOGD("... Drop one frame");
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:160:                LOGD("Pressed key %d", key);
++ty_sdk/sample/SimpleView_TriggerMode/main.cpp:170:    LOGD("=== Main done!");
++ty_sdk/sample/SimpleView_Registration/main.cpp:20:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/SimpleView_Registration/main.cpp:75:        LOGD(">>>>>>>>>> write images");
++ty_sdk/sample/SimpleView_Registration/main.cpp:92:            LOGD("Pressed key %d", key);
++ty_sdk/sample/SimpleView_Registration/main.cpp:95:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_Registration/main.cpp:116:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_Registration/main.cpp:120:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_Registration/main.cpp:123:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/SimpleView_Registration/main.cpp:127:            LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_Registration/main.cpp:129:            LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_Registration/main.cpp:135:                LOGD("=== No device got");
++ty_sdk/sample/SimpleView_Registration/main.cpp:141:        LOGD("=== Open device: %s", ID);
++ty_sdk/sample/SimpleView_Registration/main.cpp:152:    LOGD("=== Configure components");
++ty_sdk/sample/SimpleView_Registration/main.cpp:156:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_Registration/main.cpp:161:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_Registration/main.cpp:162:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_Registration/main.cpp:166:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/SimpleView_Registration/main.cpp:168:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/SimpleView_Registration/main.cpp:171:    LOGD("=== Register callback");
++ty_sdk/sample/SimpleView_Registration/main.cpp:172:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_Registration/main.cpp:173:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_Registration/main.cpp:174:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/SimpleView_Registration/main.cpp:175:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/SimpleView_Registration/main.cpp:183:    LOGD("=== Disable trigger mode");
++ty_sdk/sample/SimpleView_Registration/main.cpp:186:    LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_Registration/main.cpp:189:    LOGD("=== Read color rectify matrix");
++ty_sdk/sample/SimpleView_Registration/main.cpp:211:    LOGD("=== Wait for callback");
++ty_sdk/sample/SimpleView_Registration/main.cpp:230:    LOGD("=== Main done!");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:39:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:77:            LOGD("Pressed key %d", key);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:80:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:102:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:106:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:109:        LOGD("=== Open device %s", IP);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:112:        LOGD("=== Open device %s", ID);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:115:        LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:117:        LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:123:            LOGD("=== No device got");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:127:        LOGD("=== Open device 0");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:131:    LOGD("=== Configure components, open point3d cam");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:147:    LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:148:    LOGD("Note: DM460 resolution feature is in component TY_COMPONENT_DEVICE,");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:149:    LOGD("      other device may lays in some other components.");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:153:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:156:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:159:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:163:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:165:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/SimpleView_Point3D/main.cpp:168:    LOGD("=== Register callback");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:169:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:170:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:171:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:172:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:184:    LOGD("=== Disable trigger mode");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:187:    LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:190:    LOGD("=== While loop to fetch frame");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:197:            LOGD("... Drop one frame");
++ty_sdk/sample/SimpleView_Point3D/main.cpp:211:    LOGD("=== Main done!");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:46:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:52:    LOGD("=== Init lib");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:56:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:58:    LOGD("=== Get device info");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:61:    LOGD("     - device number %d", n);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:67:        LOGD("=== Need more than 1 devices");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:73:        LOGD("=== Open device %d (id: %s)", i, pBaseInfo[i].id);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:81:            LOGD("=== Has RGB camera, open RGB cam");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:85:        LOGD("=== Configure components, open depth cam");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:89:        LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:93:        LOGD("=== Prepare image buffer");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:96:        LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:99:        LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:102:        LOGD("     - Enqueue buffer (%p, %d)", cams[i].fb[0], frameSize);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:104:        LOGD("     - Enqueue buffer (%p, %d)", cams[i].fb[1], frameSize);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:109:        LOGD("=== Set trigger mode %d", triggerMode);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:112:        LOGD("=== Start capture");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:116:    LOGD("=== While loop to fetch frame");
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:123:                LOGD("cam %s %d ... Drop one frame", cams[i].sn, cams[i].idx);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:138:                LOGD("Unmapped key %d", key);
++ty_sdk/sample/SimpleView_MultiDevice/main.cpp:152:    LOGD("=== Main done!");
++ty_sdk/sample/common/common.hpp:59:#define LOGD(fmt,...)  printf("%d " fmt "\n", getSystemTime(), ##__VA_ARGS__)
++ty_sdk/sample/DepthToWorld/main.cpp:18:    LOGD("=== Get frame %d", ++pData->index);
++ty_sdk/sample/DepthToWorld/main.cpp:58:            LOGD("Pressed key %d", key);
++ty_sdk/sample/DepthToWorld/main.cpp:61:    LOGD("=== Callback: Re-enqueue buffer(%p, %d)", frame->userBuffer, frame->bufferSize);
++ty_sdk/sample/DepthToWorld/main.cpp:67:    LOGD("=== Init lib");
++ty_sdk/sample/DepthToWorld/main.cpp:71:    LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++ty_sdk/sample/DepthToWorld/main.cpp:73:    LOGD("=== Get device info");
++ty_sdk/sample/DepthToWorld/main.cpp:75:    LOGD("     - device number %d", n);
++ty_sdk/sample/DepthToWorld/main.cpp:81:        LOGD("=== No device got");
++ty_sdk/sample/DepthToWorld/main.cpp:85:    LOGD("=== Open device 0");
++ty_sdk/sample/DepthToWorld/main.cpp:89:    LOGD("=== Configure components, open depth cam");
++ty_sdk/sample/DepthToWorld/main.cpp:93:    LOGD("=== Configure feature, set resolution to 640x480.");
++ty_sdk/sample/DepthToWorld/main.cpp:94:    LOGD("Note: DM460 resolution feature is in component TY_COMPONENT_DEVICE,");
++ty_sdk/sample/DepthToWorld/main.cpp:95:    LOGD("      other device may lays in some other components.");
++ty_sdk/sample/DepthToWorld/main.cpp:99:    LOGD("=== Prepare image buffer");
++ty_sdk/sample/DepthToWorld/main.cpp:102:    LOGD("     - Get size of framebuffer, %d", frameSize);
++ty_sdk/sample/DepthToWorld/main.cpp:105:    LOGD("     - Allocate & enqueue buffers");
++ty_sdk/sample/DepthToWorld/main.cpp:109:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[0], frameSize);
++ty_sdk/sample/DepthToWorld/main.cpp:111:    LOGD("     - Enqueue buffer (%p, %d)", frameBuffer[1], frameSize);
++ty_sdk/sample/DepthToWorld/main.cpp:114:    LOGD("=== Register callback");
++ty_sdk/sample/DepthToWorld/main.cpp:115:    LOGD("Note: Callback may block internal data receiving,");
++ty_sdk/sample/DepthToWorld/main.cpp:116:    LOGD("      so that user should not do long time work in callback.");
++ty_sdk/sample/DepthToWorld/main.cpp:117:    LOGD("      To avoid copying data, we pop the framebuffer from buffer queue and");
++ty_sdk/sample/DepthToWorld/main.cpp:118:    LOGD("      give it back to user, user should call TYEnqueueBuffer to re-enqueue it.");
++ty_sdk/sample/DepthToWorld/main.cpp:128:    LOGD("=== Disable trigger mode");
++ty_sdk/sample/DepthToWorld/main.cpp:131:    LOGD("=== Start capture");
++ty_sdk/sample/DepthToWorld/main.cpp:134:    LOGD("=== While loop to fetch frame");
++ty_sdk/sample/DepthToWorld/main.cpp:141:            LOGD("... Drop one frame");
++ty_sdk/sample/DepthToWorld/main.cpp:155:    LOGD("=== Main done!");
+diff -urN neolixDepthModule/NeolixDepth.cpp neolixDepthModuleDemo/NeolixDepth.cpp
+--- neolixDepthModule/NeolixDepth.cpp	1970-01-01 08:30:00.000000000 +0830
++++ neolixDepthModuleDemo/NeolixDepth.cpp	2017-12-05 14:46:32.148528032 +0800
+@@ -0,0 +1,393 @@
++/*****************************************************************************
++*                                                                            *
++*  OpenNI 1.x Alpha                                                          *
++*  Copyright (C) 2012 PrimeSense Ltd.                                        *
++*                                                                            *
++*  This file is part of OpenNI.                                              *
++*                                                                            *
++*  Licensed under the Apache License, Version 2.0 (the "License");           *
++*  you may not use this file except in compliance with the License.          *
++*  You may obtain a copy of the License at                                   *
++*                                                                            *
++*      http://www.apache.org/licenses/LICENSE-2.0                            *
++*                                                                            *
++*  Unless required by applicable law or agreed to in writing, software       *
++*  distributed under the License is distributed on an "AS IS" BASIS,         *
++*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  *
++*  See the License for the specific language governing permissions and       *
++*  limitations under the License.                                            *
++*                                                                            *
++*****************************************************************************/
++//---------------------------------------------------------------------------
++// Includes
++//---------------------------------------------------------------------------
++#include "NeolixDepth.h"
++
++
++#define SUPPORTED_X_RES 640
++#define SUPPORTED_Y_RES 480
++#define SUPPORTED_FPS 30
++#define MAX_DEPTH_VALUE	15000
++
++NeolixDepth::NeolixDepth() : 
++	m_bGenerating(FALSE),
++	m_bDataAvailable(FALSE),
++	m_pDepthMap(NULL),
++	m_nFrameID(0),
++	m_nTimestamp(0),
++	m_hScheduler(NULL),
++	m_bMirror(FALSE)
++{
++}
++
++NeolixDepth::~NeolixDepth()
++{
++	if (hasOpen)
++	{
++		ASSERT_OK(TYStopCapture(hDevice));
++		ASSERT_OK(TYCloseDevice(hDevice));
++		ASSERT_OK(TYDeinitLib());
++	}
++	if (pVer != NULL) delete pVer;
++	if (pDeviceBaseInfo != NULL) delete pDeviceBaseInfo;
++	if (frameBuffer[0] != NULL) delete[] frameBuffer[0];
++	if (frameBuffer[1] != NULL) delete[] frameBuffer[1];
++	hasOpen = false;
++
++	delete[] m_pDepthMap;
++}
++
++XnStatus NeolixDepth::Init()
++{
++	m_pDepthMap = new XnDepthPixel[SUPPORTED_X_RES * SUPPORTED_Y_RES];
++	if (m_pDepthMap == NULL)
++	{
++		return XN_STATUS_ALLOC_FAILED;
++	}
++	componentIDs = TY_COMPONENT_DEPTH_CAM;
++	//CHECK(TYInitLib());//ÂàùÂßãÂåñAPI
++	ASSERT_OK(TYInitLib());
++	//Ëé∑ÂèñAPIÁâàÊú¨
++	this->pVer = new TY_VERSION_INFO;
++	ASSERT_OK(TYLibVersion(pVer));
++	LOGD("     - lib version: %d.%d.%d", pVer->major, pVer->minor, pVer->patch);
++
++	//Ëé∑ÂèñËÆæÂ§áÊï∞Èáè
++	ASSERT_OK(TYGetDeviceNumber(&deviceNumber));
++	LOGD("     - device number %d", deviceNumber);
++
++	//Ëé∑ÂæóËÆæÂ§áÂü∫Êú¨‰ø°ÊÅØ
++	this->pDeviceBaseInfo = new TY_DEVICE_BASE_INFO[100];
++	ASSERT_OK(TYGetDeviceList(pDeviceBaseInfo, 100, &deviceNumber));
++	if (deviceNumber == 0)
++		return XN_STATUS_ERROR;
++
++	//ÊâìÂºÄËÆæÂ§á
++	ASSERT_OK(TYOpenDevice(pDeviceBaseInfo[0].id, &hDevice));
++
++	TY_FEATURE_INFO info;
++	TY_STATUS ty_status;
++	int32_t frameSize;
++
++	ASSERT_OK(TYEnableComponents(hDevice, componentIDs));
++	//ËÆæÁΩÆÊëÑÂÉèÂ§¥ÂèÇÊï∞
++	//TYSetEnum(hDevice,componentIDs,enum_model,enum_model_value);
++	TYSetEnum(hDevice, TY_COMPONENT_RGB_CAM_LEFT, TY_ENUM_IMAGE_MODE, TY_IMAGE_MODE_1280x960);
++	TYSetEnum(hDevice, TY_COMPONENT_DEPTH_CAM, TY_ENUM_IMAGE_MODE, TY_IMAGE_MODE_640x480);
++
++// 	if (frameBuffer[0] != nullptr) delete[] frameBuffer[0];
++// 	if (frameBuffer[1] != nullptr) delete[] frameBuffer[1];
++
++	//Ëé∑Âæó‰∏ÄÂ∏ßÊï∞ÊçÆÁöÑÂ§ßÂ∞è
++	TYGetFrameBufferSize(hDevice, &frameSize);
++	frameBuffer[0] = new char[frameSize];
++	frameBuffer[1] = new char[frameSize];
++	//===Enqueue buffer =====
++	TYEnqueueBuffer(hDevice, frameBuffer[0], frameSize);
++	TYEnqueueBuffer(hDevice, frameBuffer[1], frameSize);
++	//=====disable trigger model====
++	ty_status = TYGetFeatureInfo(hDevice, TY_COMPONENT_DEVICE, TY_BOOL_TRIGGER_MODE, &info);
++	if ((info.accessMode & TY_ACCESS_WRITABLE) && (ty_status == TY_STATUS_OK)) {
++		ASSERT_OK(TYSetBool(hDevice, TY_COMPONENT_DEVICE, TY_BOOL_TRIGGER_MODE, false));
++	}
++
++	//=====start capture====
++	TYStartCapture(hDevice);
++
++	hasOpen = true;
++
++	return (XN_STATUS_OK);
++}
++
++XnBool NeolixDepth::IsCapabilitySupported( const XnChar* strCapabilityName )
++{
++	// we only support the mirror capability
++	return (strcmp(strCapabilityName, XN_CAPABILITY_MIRROR) == 0);
++}
++
++XnStatus NeolixDepth::StartGenerating()
++{
++	XnStatus nRetVal = XN_STATUS_OK;
++	
++	m_bGenerating = TRUE;
++
++	// start scheduler thread
++	nRetVal = xnOSCreateThread(SchedulerThread, this, &m_hScheduler);
++	if (nRetVal != XN_STATUS_OK)
++	{
++		m_bGenerating = FALSE;
++		return (nRetVal);
++	}
++
++	m_generatingEvent.Raise();
++
++	return (XN_STATUS_OK);
++}
++
++XnBool NeolixDepth::IsGenerating()
++{
++	return m_bGenerating;
++}
++
++void NeolixDepth::StopGenerating()
++{
++	m_bGenerating = FALSE;
++
++	// wait for thread to exit
++	xnOSWaitForThreadExit(m_hScheduler, 100);
++
++	m_generatingEvent.Raise();
++}
++
++XnStatus NeolixDepth::RegisterToGenerationRunningChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
++{
++	return m_generatingEvent.Register(handler, pCookie, hCallback);
++}
++
++void NeolixDepth::UnregisterFromGenerationRunningChange( XnCallbackHandle hCallback )
++{
++	m_generatingEvent.Unregister(hCallback);
++}
++
++XnStatus NeolixDepth::RegisterToNewDataAvailable( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
++{
++	return m_dataAvailableEvent.Register(handler, pCookie, hCallback);
++}
++
++void NeolixDepth::UnregisterFromNewDataAvailable( XnCallbackHandle hCallback )
++{
++	m_dataAvailableEvent.Unregister(hCallback);
++}
++
++XnBool NeolixDepth::IsNewDataAvailable( XnUInt64& nTimestamp )
++{
++	// return next timestamp
++	nTimestamp = 1000000 / SUPPORTED_FPS;
++	return m_bDataAvailable;
++}
++
++XnStatus NeolixDepth::UpdateData()
++{
++	XnDepthPixel* pPixel = m_pDepthMap;
++	int err = TYFetchFrame(hDevice, &frame, -1);
++	for (int i = 0; i < frame.validCount; i++)
++	{
++		// get depth image
++		if (frame.image[i].componentID == TY_COMPONENT_DEPTH_CAM)
++		{
++			memcpy(m_pDepthMap, frame.image[i].buffer, sizeof(XnDepthPixel)*SUPPORTED_X_RES*SUPPORTED_Y_RES);
++			break;
++		}
++	}
++
++	TYEnqueueBuffer(hDevice, frame.userBuffer, frame.bufferSize);
++
++#if 0
++	// change our internal data, so that pixels go from frameID incrementally in both axes.
++	for (XnUInt y = 0; y < SUPPORTED_Y_RES; ++y)
++	{
++		for (XnUInt x = 0; x < SUPPORTED_X_RES; ++x, ++pPixel)
++		{
++			*pPixel = (m_nFrameID + x + y) % MAX_DEPTH_VALUE;
++		}
++	}
++#endif
++	// if needed, mirror the map
++	if (m_bMirror)
++	{
++		XnDepthPixel temp;
++
++		for (XnUInt y = 0; y < SUPPORTED_Y_RES; ++y)
++		{
++			XnDepthPixel* pUp = &m_pDepthMap[y * SUPPORTED_X_RES];
++			XnDepthPixel* pDown = &m_pDepthMap[(y+1) * SUPPORTED_X_RES - 1];
++
++			for (XnUInt x = 0; x < SUPPORTED_X_RES/2; ++x, ++pUp, --pDown)
++			{
++				temp = *pUp;
++				*pUp = *pDown;
++				*pDown = temp;
++			}
++		}
++	}
++
++	m_nFrameID++;
++	m_nTimestamp += 1000000 / SUPPORTED_FPS;
++
++	// mark that data is old
++	m_bDataAvailable = FALSE;
++	
++	return (XN_STATUS_OK);
++}
++
++
++const void* NeolixDepth::GetData()
++{
++	return m_pDepthMap;
++}
++
++XnUInt32 NeolixDepth::GetDataSize()
++{
++	return (SUPPORTED_X_RES * SUPPORTED_Y_RES * sizeof(XnDepthPixel));
++}
++
++XnUInt64 NeolixDepth::GetTimestamp()
++{
++	return m_nTimestamp;
++}
++
++XnUInt32 NeolixDepth::GetFrameID()
++{
++	return m_nFrameID;
++}
++
++xn::ModuleMirrorInterface* NeolixDepth::GetMirrorInterface()
++{
++	return this;
++}
++
++XnStatus NeolixDepth::SetMirror( XnBool bMirror )
++{
++	m_bMirror = bMirror;
++	m_mirrorEvent.Raise();
++	return (XN_STATUS_OK);
++}
++
++XnBool NeolixDepth::IsMirrored()
++{
++	return m_bMirror;
++}
++
++XnStatus NeolixDepth::RegisterToMirrorChange( XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback )
++{
++	return m_mirrorEvent.Register(handler, pCookie, hCallback);
++}
++
++void NeolixDepth::UnregisterFromMirrorChange( XnCallbackHandle hCallback )
++{
++	m_mirrorEvent.Unregister(hCallback);
++}
++
++XnUInt32 NeolixDepth::GetSupportedMapOutputModesCount()
++{
++	// we only support a single mode
++	return 1;
++}
++
++XnStatus NeolixDepth::GetSupportedMapOutputModes( XnMapOutputMode aModes[], XnUInt32& nCount )
++{
++	if (nCount < 1)
++	{
++		return XN_STATUS_OUTPUT_BUFFER_OVERFLOW;
++	}
++
++	aModes[0].nXRes = SUPPORTED_X_RES;
++	aModes[0].nYRes = SUPPORTED_Y_RES;
++	aModes[0].nFPS = SUPPORTED_FPS;
++
++	return (XN_STATUS_OK);
++}
++
++XnStatus NeolixDepth::SetMapOutputMode( const XnMapOutputMode& Mode )
++{
++	// make sure this is our supported mode
++	if (Mode.nXRes != SUPPORTED_X_RES ||
++		Mode.nYRes != SUPPORTED_Y_RES ||
++		Mode.nFPS != SUPPORTED_FPS)
++	{
++		return (XN_STATUS_BAD_PARAM);
++	}
++
++	return (XN_STATUS_OK);
++}
++
++XnStatus NeolixDepth::GetMapOutputMode( XnMapOutputMode& Mode )
++{
++	Mode.nXRes = SUPPORTED_X_RES;
++	Mode.nYRes = SUPPORTED_Y_RES;
++	Mode.nFPS = SUPPORTED_FPS;
++
++	return (XN_STATUS_OK);
++}
++
++XnStatus NeolixDepth::RegisterToMapOutputModeChange( XnModuleStateChangedHandler /*handler*/, void* /*pCookie*/, XnCallbackHandle& hCallback )
++{
++	// no need. we only allow one mode
++	hCallback = this;
++	return XN_STATUS_OK;
++}
++
++void NeolixDepth::UnregisterFromMapOutputModeChange( XnCallbackHandle /*hCallback*/ )
++{
++	// do nothing (we didn't really register)	
++}
++
++XnDepthPixel* NeolixDepth::GetDepthMap()
++{
++	return m_pDepthMap;
++}
++
++XnDepthPixel NeolixDepth::GetDeviceMaxDepth()
++{
++	return MAX_DEPTH_VALUE;
++}
++
++void NeolixDepth::GetFieldOfView( XnFieldOfView& FOV )
++{
++	// some numbers
++	FOV.fHFOV = 1.35;
++	FOV.fVFOV = 1.35;
++}
++
++XnStatus NeolixDepth::RegisterToFieldOfViewChange( XnModuleStateChangedHandler /*handler*/, void* /*pCookie*/, XnCallbackHandle& hCallback )
++{
++	// no need. it never changes
++	hCallback = this;
++	return XN_STATUS_OK;
++}
++
++void NeolixDepth::UnregisterFromFieldOfViewChange( XnCallbackHandle /*hCallback*/ )
++{
++	// do nothing (we didn't really register)	
++}
++
++XN_THREAD_PROC NeolixDepth::SchedulerThread( void* pCookie )
++{
++	NeolixDepth* pThis = (NeolixDepth*)pCookie;
++
++	while (pThis->m_bGenerating)
++	{
++		// wait 33 ms (to produce 30 FPS)
++		xnOSSleep(1000000/SUPPORTED_FPS/1000);
++
++		pThis->OnNewFrame();
++	}
++
++	XN_THREAD_PROC_RETURN(0);
++}
++
++void NeolixDepth::OnNewFrame()
++{
++	m_bDataAvailable = TRUE;
++	m_dataAvailableEvent.Raise();
++}
+diff -urN neolixDepthModule/NeolixDepth.h neolixDepthModuleDemo/NeolixDepth.h
+--- neolixDepthModule/NeolixDepth.h	1970-01-01 08:30:00.000000000 +0830
++++ neolixDepthModuleDemo/NeolixDepth.h	2017-12-05 14:46:32.120528031 +0800
+@@ -0,0 +1,104 @@
++/*****************************************************************************
++*                                                                            *
++*  OpenNI 1.x Alpha                                                          *
++*  Copyright (C) 2012 PrimeSense Ltd.                                        *
++*                                                                            *
++*  This file is part of OpenNI.                                              *
++*                                                                            *
++*  Licensed under the Apache License, Version 2.0 (the "License");           *
++*  you may not use this file except in compliance with the License.          *
++*  You may obtain a copy of the License at                                   *
++*                                                                            *
++*      http://www.apache.org/licenses/LICENSE-2.0                            *
++*                                                                            *
++*  Unless required by applicable law or agreed to in writing, software       *
++*  distributed under the License is distributed on an "AS IS" BASIS,         *
++*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  *
++*  See the License for the specific language governing permissions and       *
++*  limitations under the License.                                            *
++*                                                                            *
++*****************************************************************************/
++#include <XnModuleCppInterface.h>
++#include <XnEventT.h>
++#include "common.hpp"
++#include <iostream>
++using namespace std;
++class NeolixDepth : 
++	public virtual xn::ModuleDepthGenerator,
++	public virtual xn::ModuleMirrorInterface
++{
++public:
++	NeolixDepth();
++	virtual ~NeolixDepth();
++
++	XnStatus Init();
++
++	// ProductionNode methods
++	virtual XnBool IsCapabilitySupported(const XnChar* strCapabilityName);
++
++	// Generator methods
++	virtual XnStatus StartGenerating();
++	virtual XnBool IsGenerating();
++	virtual void StopGenerating();
++	virtual XnStatus RegisterToGenerationRunningChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
++	virtual void UnregisterFromGenerationRunningChange(XnCallbackHandle hCallback);
++	virtual XnStatus RegisterToNewDataAvailable(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
++	virtual void UnregisterFromNewDataAvailable(XnCallbackHandle hCallback);
++	virtual XnBool IsNewDataAvailable(XnUInt64& nTimestamp);
++	virtual XnStatus UpdateData();
++	virtual const void* GetData();
++	virtual XnUInt32 GetDataSize();
++	virtual XnUInt64 GetTimestamp();
++	virtual XnUInt32 GetFrameID();
++	virtual xn::ModuleMirrorInterface* GetMirrorInterface();
++
++	// Mirror methods
++	virtual XnStatus SetMirror(XnBool bMirror);
++	virtual XnBool IsMirrored();
++	virtual XnStatus RegisterToMirrorChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
++	virtual void UnregisterFromMirrorChange(XnCallbackHandle hCallback);
++
++	// MapGenerator methods
++	virtual XnUInt32 GetSupportedMapOutputModesCount();
++	virtual XnStatus GetSupportedMapOutputModes(XnMapOutputMode aModes[], XnUInt32& nCount);
++	virtual XnStatus SetMapOutputMode(const XnMapOutputMode& Mode);
++	virtual XnStatus GetMapOutputMode(XnMapOutputMode& Mode);
++	virtual XnStatus RegisterToMapOutputModeChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
++	virtual void UnregisterFromMapOutputModeChange(XnCallbackHandle hCallback);
++
++	// DepthGenerator methods
++	virtual XnDepthPixel* GetDepthMap();
++	virtual XnDepthPixel GetDeviceMaxDepth();
++	virtual void GetFieldOfView(XnFieldOfView& FOV);
++	virtual XnStatus RegisterToFieldOfViewChange(XnModuleStateChangedHandler handler, void* pCookie, XnCallbackHandle& hCallback);
++	virtual void UnregisterFromFieldOfViewChange(XnCallbackHandle hCallback);
++
++private:
++	//TY data
++	int deviceNumber;//ËÆæÂ§áÊï∞Èáè
++	TY_VERSION_INFO * pVer;//apiÁâàÊú¨
++	TY_DEVICE_BASE_INFO* pDeviceBaseInfo;//ËÆæÂ§áÁöÑÂü∫Á°Ä‰ø°ÊÅØ
++	TY_DEV_HANDLE hDevice;//ËÆæÂ§áÁöÑÂè•ÊüÑ
++	int32_t componentIDs;//ÁªÑ‰ª∂IDs
++	int32_t enum_model;
++	int32_t enum_model_value;
++	bool printLog;
++	std::string logFile;
++	bool hasOpen;
++	char* frameBuffer[2];
++	TY_FRAME_DATA frame;
++    //TY data end
++	static XN_THREAD_PROC SchedulerThread(void* pCookie);
++	void OnNewFrame();
++
++	XnBool m_bGenerating;
++	XnBool m_bDataAvailable;
++	XnDepthPixel* m_pDepthMap;
++	XnUInt32 m_nFrameID;
++	XnUInt64 m_nTimestamp;
++	XN_THREAD_HANDLE m_hScheduler;
++	XnBool m_bMirror;
++	XnEventNoArgs m_generatingEvent;
++	XnEventNoArgs m_dataAvailableEvent;
++	XnEventNoArgs m_mirrorEvent;
++};
+diff -urN neolixDepthModule/Registration.cpp neolixDepthModuleDemo/Registration.cpp
+--- neolixDepthModule/Registration.cpp	2017-12-05 14:46:33.140528051 +0800
++++ neolixDepthModuleDemo/Registration.cpp	2017-12-05 14:46:32.108528031 +0800
+@@ -1,28 +1,28 @@
+ /*****************************************************************************
+ *                                                                            *
+-*  Copyright (C) 2017 Letv.                                                  *
++*  OpenNI 1.x Alpha                                                          *
++*  Copyright (C) 2012 PrimeSense Ltd.                                        *
+ *                                                                            *
+-*  This is afree software: you can redistribute it and/or modify             *
+-*  it under the terms of the GNU Lesser General Public License as published  *
+-*  by the Free Software Foundation, either version 3 of the License, or      *
+-*  (at your option) any later version.                                       *
+-*                                                                            *
+-*  This is distributed in the hope that it will be useful,                   *
+-*  but WITHOUT ANY WARRANTY; without even the implied warranty of            *
+-*  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the              *
+-*  GNU Lesser General Public License for more details.                       *
++*  This file is part of OpenNI.                                              *
+ *                                                                            *
+-*  You should see a copy of the GNU Lesser General Public License			 *
+-*  in <http://www.gnu.org/licenses/>.										 *
++*  Licensed under the Apache License, Version 2.0 (the "License");           *
++*  you may not use this file except in compliance with the License.          *
++*  You may obtain a copy of the License at                                   *
++*                                                                            *
++*      http://www.apache.org/licenses/LICENSE-2.0                            *
++*                                                                            *
++*  Unless required by applicable law or agreed to in writing, software       *
++*  distributed under the License is distributed on an "AS IS" BASIS,         *
++*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  *
++*  See the License for the specific language governing permissions and       *
++*  limitations under the License.                                            *
+ *                                                                            *
+ *****************************************************************************/
+-
+-
+-#include "ExportedDepthLetv.h"
++#include "ExportedNeolixDepth.h"
+ #include <XnModuleCppRegistratration.h>
+ 
+ // tell OpenNI this shared library is a module
+ XN_EXPORT_MODULE(Module)
+ 
+ // tell OpenNI we export a depth node, and give it its exporter class.
+-XN_EXPORT_DEPTH(ExportedDepthLetv)
+\ No newline at end of file
++XN_EXPORT_DEPTH(ExportedNeolixDepth)
+diff -urN neolixDepthModule/ty_sdk/sample/common/common.hpp neolixDepthModuleDemo/ty_sdk/sample/common/common.hpp
+--- neolixDepthModule/ty_sdk/sample/common/common.hpp	2017-12-05 14:48:25.272530202 +0800
++++ neolixDepthModuleDemo/ty_sdk/sample/common/common.hpp	2017-12-05 14:48:24.104530179 +0800
+@@ -47,9 +47,10 @@
+   }
+ #else
+ # include <sys/time.h>
+-  inline int32_t getSystemTime()
++  inline uint32_t getSystemTime()
+   {
+-      struct timeval tv;
++      //printf("lallalsla\n");
++	  struct timeval tv;
+       gettimeofday(&tv, NULL);
+       return tv.tv_sec*1000 + tv.tv_usec/1000;
+   }

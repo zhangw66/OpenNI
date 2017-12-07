@@ -1,0 +1,9 @@
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/edit_cache.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/DumpAllFeatures.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/SimpleView_MultiDevice.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/SimpleView_TriggerMode.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/sample_common.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/rebuild_cache.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/SimpleView_Registration.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/SimpleView_Callback.dir
+/home/zhangw/workdir/xsq/OpenNI/Source/Modules/neolixImageModuleDemo/ty_sdk/sample/build/CMakeFiles/SimpleView_FetchFrame.dir

@@ -1,0 +1,5 @@
+1、此Tof sdk 版本为 v2.0.1   对应的固件版本日期必须是170925（包含）以后
+2、SampleCode.cpp 文件是 比较详解的sdk调用demo
+3、SampleCode2.cpp 是多线程支持多设备的调用demo
+4、Mars04test  是SampleCode.cpp生成的可执行程序
+

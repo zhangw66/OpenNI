@@ -14,7 +14,10 @@ else
 	USED_LIBS += glut GL
 endif
 
-USED_LIBS += OpenNI
+USED_LIBS += OpenNI \
+			 opencv_core\
+			 opencv_highgui\
+			 opencv_imgproc
 
 include ../../Common/CommonCppMakefile
 
